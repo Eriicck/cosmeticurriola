@@ -102,6 +102,9 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState(null); 
   const [modalQuantity, setModalQuantity] = useState(1);
 
+  // Mover este estado al top level para evitar que el input pierda el foco al re-renderizar
+  const [isOrderSummaryOpen, setIsOrderSummaryOpen] = useState(false);
+
   // Paginación
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 16;
@@ -189,7 +192,7 @@ export default function App() {
   };
 
   // --- VISTA DE TIENDA (SHOP) ---
-  const ShopView = () => (
+  const renderShopView = () => (
     <div className="min-h-screen bg-white font-sans text-gray-900 transition-opacity duration-500 flex flex-col">
       {/* Navbar Superior */}
       <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-sm border-b border-gray-100 transition-all duration-300">
@@ -329,7 +332,7 @@ export default function App() {
   );
 
   // --- MODAL DE PRODUCTO (VISTA RAPIDA MEJORADA) ---
-  const ProductModal = () => {
+  const renderProductModal = () => {
     if (!selectedProduct) return null;
     
     return (
@@ -429,9 +432,7 @@ export default function App() {
   };
 
   // --- VISTA DE CHECKOUT ---
-  const CheckoutView = () => {
-    const [isOrderSummaryOpen, setIsOrderSummaryOpen] = useState(false);
-
+  const renderCheckoutView = () => {
     return (
       <div className="min-h-screen bg-[#f4ece5] font-sans md:flex animate-in fade-in duration-500">
         {/* Cabecera Móvil */}
@@ -652,10 +653,11 @@ export default function App() {
 
   return (
     <div className="relative selection:bg-gray-200">
-      {view === 'shop' ? <ShopView /> : <CheckoutView />}
+      {/* Al llamar las vistas como funciones en lugar de componentes evitamos el re-render de React */}
+      {view === 'shop' ? renderShopView() : renderCheckoutView()}
 
       {/* MODAL PRODUCTO */}
-      <ProductModal />
+      {renderProductModal()}
 
       {/* DRAWER DEL FILTRO */}
       <Drawer isOpen={isFilterOpen} onClose={() => setIsFilterOpen(false)} title="Filtrar">
