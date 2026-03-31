@@ -61,10 +61,9 @@ export default function App() {
       <Routes>
         <Route path="/"         element={<Index    {...cartProps} />} />
         <Route path="/products" element={<Products {...cartProps} />} />
-        <Route path="/checkout" element={<Checkout cart={cart} cartCount={cartCount} onOpenCart={() => setIsCartOpen(true)} />} />
-        {/* Panel de administración */}
-        <Route path="/Admin"    element={<Admin />} />
-        <Route path="*"         element={<Navigate to="/" replace />} />
+        <Route path="/checkout" element={<Checkout cart={cart} />} />
+        {/* Aquí agregamos la ruta para que React sepa qué abrir en /admin */}
+        <Route path="/admin"    element={<Admin />} />
       </Routes>
     </BrowserRouter>
   );
