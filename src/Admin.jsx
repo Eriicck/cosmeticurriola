@@ -4,12 +4,14 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getAuth, signOut } from 'firebase/auth';
 import {
   Settings, Package, Grid, Image, Video, Plus, Trash2,
   Edit2, Save, X, ChevronUp, ChevronDown, Eye, EyeOff,
   Tag, ToggleLeft, ToggleRight, Check, AlertCircle, Layers,
   Palette, RefreshCw, ChevronLeft, ChevronRight, Home,
-  Search, Film, FileImage, Layout
+  Search, Film, FileImage, Layout, LogOut
 } from 'lucide-react';
 import { MOCK_PRODUCTS, WHATSAPP_NUMBER } from './data';
 
@@ -705,13 +707,14 @@ const MAIN_TABS = [
 ];
 
 export default function Admin() {
+  const navigate = useNavigate();
   const [config,       setConfig]       = useState(() => { const s=getAdminConfig(); return { ...DEFAULT_CONFIG, ...s, products: s.products ?? DEFAULT_CONFIG.products }; });
   const [activeTab,    setActiveTab]    = useState('dashboard');
   const [activeFilter, setActiveFilter] = useState('all');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast,        setToast]        = useState(null);
   const [dirty,        setDirty]        = useState(false);
-  const [importDone,   setImportDone]   = useState(false);
+  const [importDone,   setImportDone]   = useState(() => !!localStorage.getItem('urriola_import_done'));
   const [importing,    setImporting]    = useState(false);
 
   const handleChange = useCallback(cfg => { setConfig(cfg); setDirty(true); }, []);
@@ -732,18 +735,54 @@ export default function Admin() {
     if (filter) setActiveFilter(filter);
   };
 
-  // Importar productos mock — botón único
-  const handleImportMock = () => {
-    if (!window.confirm(`¿Importar ${MOCK_PRODUCTS.length} productos al admin? Esta acción agrega los productos del catálogo inicial.`)) return;
+  // Importar productos mock — sube a Firebase Y actualiza estado local
+  const handleImportMock = async () => {
+    if (!window.confirm(`¿Importar ${MOCK_PRODUCTS.length} productos a Firebase? Esto los hará visibles en la tienda.`)) return;
     setImporting(true);
-    const existing = new Set((config.products || []).map(p => p.name));
-    const toAdd = MOCK_PRODUCTS
-      .filter(p => !existing.has(p.name))
-      .map(p => ({ ...p, description:'', inOffer:false, offerPrice:null, hasTon:false, tonValue:'', visible:true, lowStock:false }));
-    handleChange({ ...config, products: [...(config.products||[]), ...toAdd] });
-    setImporting(false);
-    setImportDone(true);
-    setToast(`✅ ${toAdd.length} productos importados`); setTimeout(() => setToast(null), 3000);
+    try {
+      const { getFirestore, collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const db = getFirestore();
+      let count = 0;
+      for (const p of MOCK_PRODUCTS) {
+        await addDoc(collection(db, 'products'), {
+          brand:       p.brand,
+          name:        p.name,
+          price:       p.price,
+          image:       p.image,
+          images:      p.images || [p.image],
+          category:    p.category || 'facial',
+          stock:       true,
+          visible:     true,
+          featured:    false,
+          inOffer:     false,
+          offerPrice:  null,
+          hasTon:      false,
+          tonValue:    '',
+          lowStock:    false,
+          description: '',
+          rating:      p.rating || 4.5,
+          reviews:     p.reviews || 0,
+          createdAt:   serverTimestamp(),
+        });
+        count++;
+      }
+      // También actualiza el estado local del admin
+      const toAdd = MOCK_PRODUCTS.map(p => ({
+        ...p, description:'', inOffer:false, offerPrice:null,
+        hasTon:false, tonValue:'', visible:true, lowStock:false,
+      }));
+      handleChange({ ...config, products: [...(config.products||[]), ...toAdd] });
+      setImportDone(true);
+      localStorage.setItem('urriola_import_done', '1');
+      setToast(`✅ ${count} productos subidos a Firebase`);
+      setTimeout(() => setToast(null), 3500);
+    } catch (err) {
+      console.error(err);
+      setToast('❌ Error al importar. Revisá la consola.');
+      setTimeout(() => setToast(null), 3500);
+    } finally {
+      setImporting(false);
+    }
   };
 
   // Importar CSV
@@ -777,6 +816,11 @@ export default function Admin() {
     handleChange({ ...config, products: [...(config.products||[]), ...newProds] });
     setToast(`✅ ${newProds.length} productos importados desde CSV`); setTimeout(() => setToast(null), 3000);
     e.target.value = '';
+  };
+
+  const handleLogout = async () => {
+    await signOut(getAuth());
+    navigate('/admin/login');
   };
 
   return (
@@ -813,6 +857,10 @@ export default function Admin() {
               className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-all
                 ${dirty ? 'bg-[#4a3a31] text-white hover:bg-[#c9a96e] shadow-md' : 'bg-gray-100 text-gray-400 cursor-default'}`}>
               <Save size={13}/> Guardar
+            </button>
+            <button onClick={handleLogout} title="Cerrar sesión"
+              className="p-2.5 rounded-full border border-[#e8ddd0] text-[#4a3a31] hover:border-red-300 hover:text-red-400 transition-colors">
+              <LogOut size={15}/>
             </button>
           </div>
         </div>
