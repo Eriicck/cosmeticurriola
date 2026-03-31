@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { getAdminConfig } from './Admin';
 
-// ─── MARCAS (pueden pasarse a admin si querés en el futuro) ──────────────────
+// ─── MARCAS (pueden pasarse a admin si querés en el nfuturo) ──────────────────
 const BRANDS = ['ABIB','ANUA','APLB','BEAUTY OF JOSEON','COSRX','INNISFREE','SOME BY MI','ISNTREE','KLAIRS','ROUND LAB','TORRIDEN','AXIS-Y','PURITO','DR. JART+','MEDIHEAL'];
 
 const NAV_LINKS = [
