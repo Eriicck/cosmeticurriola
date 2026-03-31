@@ -1,5 +1,5 @@
 /**
- * ADMIN.JSX — Panel de control U.RRIOLA
+ * ADMIN.JSX — Panel de control U.RRIOLA v2
  * getAdminConfig() es usado por index.jsx y pronbnducts.jsx
  */
 
