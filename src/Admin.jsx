@@ -358,9 +358,9 @@ function CategoriesSection({ config, onChange }) {
 // ─── PRODUCTOS ────────────────────────────────────────────────────────────────
 const PROD_PER_PAGE = 12;
 
-function ProductsSection({ config, onChange }) {
+function ProductsSection({ config, onChange, initialFilter = 'all' }) {
   const [search,    setSearch]    = useState('');
-  const [filter,    setFilter]    = useState('all');
+  const [filter,    setFilter]    = useState(initialFilter);
   const [page,      setPage]      = useState(1);
   const [editingId, setEditingId] = useState(null);
   const [editBuf,   setEditBuf]   = useState(null);
@@ -371,10 +371,11 @@ function ProductsSection({ config, onChange }) {
     const q = search.toLowerCase();
     const m = p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q);
     if (!m) return false;
-    if (filter === 'offer')   return p.inOffer;
-    if (filter === 'hidden')  return !p.visible;
-    if (filter === 'ton')     return p.hasTon;
-    if (filter === 'nostock') return p.stock === false;
+    if (filter === 'offer')    return p.inOffer;
+    if (filter === 'hidden')   return !p.visible;
+    if (filter === 'ton')      return p.hasTon;
+    if (filter === 'nostock')  return p.stock === false;
+    if (filter === 'lowstock') return p.lowStock === true;
     return true;
   }), [prods, search, filter]);
 
@@ -402,6 +403,7 @@ function ProductsSection({ config, onChange }) {
     ['all','Todos',prods.length],
     ['offer','En oferta',prods.filter(p=>p.inOffer).length],
     ['nostock','Sin stock',prods.filter(p=>p.stock===false).length],
+    ['lowstock','Poco stock',prods.filter(p=>p.lowStock===true).length],
     ['hidden','Ocultos',prods.filter(p=>!p.visible).length],
     ['ton','Con ton',prods.filter(p=>p.hasTon).length],
   ];
@@ -466,9 +468,10 @@ function ProductsSection({ config, onChange }) {
                 </Field>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-gray-50 rounded-xl p-4">
                   <Toggle value={editBuf.visible} onChange={v => setEditBuf(b=>({...b,visible:v}))}  label="Visible"/>
-                  <Toggle value={editBuf.stock}   onChange={v => setEditBuf(b=>({...b,stock:v}))}    label="En stock"/>
-                  <Toggle value={editBuf.inOffer} onChange={v => setEditBuf(b=>({...b,inOffer:v}))}  label="En oferta"/>
-                  <Toggle value={editBuf.hasTon}  onChange={v => setEditBuf(b=>({...b,hasTon:v}))}   label="Tiene ton"/>
+                  <Toggle value={editBuf.stock}    onChange={v => setEditBuf(b=>({...b,stock:v}))}     label="En stock"/>
+                  <Toggle value={editBuf.inOffer}  onChange={v => setEditBuf(b=>({...b,inOffer:v}))}   label="En oferta"/>
+                  <Toggle value={editBuf.hasTon}   onChange={v => setEditBuf(b=>({...b,hasTon:v}))}    label="Tiene ton"/>
+                  <Toggle value={!!editBuf.lowStock} onChange={v => setEditBuf(b=>({...b,lowStock:v}))} label="Poco stock"/>
                 </div>
                 {editBuf.inOffer && (
                   <Field label="Precio de oferta USD">
@@ -495,6 +498,7 @@ function ProductsSection({ config, onChange }) {
                     <p className="text-xs text-gray-400">${Number(p.price).toFixed(2)}</p>
                     {p.inOffer   && <span className="text-[9px] font-bold uppercase text-[#c9a96e] bg-[#c9a96e]/10 px-1.5 py-0.5 rounded-full">Oferta</span>}
                     {!p.stock    && <span className="text-[9px] font-bold uppercase text-red-400 bg-red-50 px-1.5 py-0.5 rounded-full">Sin stock</span>}
+                    {p.lowStock  && <span className="text-[9px] font-bold uppercase text-orange-400 bg-orange-50 px-1.5 py-0.5 rounded-full">Poco stock</span>}
                     {p.hasTon    && <span className="text-[9px] font-bold uppercase text-purple-400 bg-purple-50 px-1.5 py-0.5 rounded-full">Ton</span>}
                     {!p.visible  && <span className="text-[9px] font-bold uppercase text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">Oculto</span>}
                   </div>
@@ -550,11 +554,12 @@ function ProductsSection({ config, onChange }) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ config, onNavigate }) {
+function Dashboard({ config, onNavigate, onImportMock, onCSVImport, importing, importDone }) {
   const prods    = config.products || [];
   const enOferta = prods.filter(p => p.inOffer).length;
   const sinStock = prods.filter(p => p.stock === false).length;
   const ocultos  = prods.filter(p => !p.visible).length;
+  const pocoStock = prods.filter(p => p.lowStock === true).length;
   const cats     = config.categories.filter(c => c.visible).length;
 
   return (
@@ -566,18 +571,20 @@ function Dashboard({ config, onNavigate }) {
         <p className="text-sm text-gray-400 mt-1">Gestión de tu tienda U.RRIOLA K-Beauty</p>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Stats — cada una lleva a productos con filtro */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
-          { label:'Total productos', value:prods.length, bg:'bg-[#4a3a31]',    text:'text-white' },
-          { label:'En oferta',       value:enOferta,     bg:'bg-[#c9a96e]/15', text:'text-[#c9a96e]' },
-          { label:'Sin stock',       value:sinStock,     bg:'bg-red-50',       text:'text-red-400' },
-          { label:'Ocultos',         value:ocultos,      bg:'bg-gray-100',     text:'text-gray-400' },
+          { label:'Total productos', value:prods.length,  bg:'bg-[#4a3a31]',    text:'text-white',        filter:'all' },
+          { label:'En oferta',       value:enOferta,      bg:'bg-[#c9a96e]/15', text:'text-[#c9a96e]',    filter:'offer' },
+          { label:'Sin stock',       value:sinStock,      bg:'bg-red-50',       text:'text-red-400',      filter:'nostock' },
+          { label:'Poco stock',      value:pocoStock,     bg:'bg-orange-50',    text:'text-orange-400',   filter:'lowstock' },
+          { label:'Ocultos',         value:ocultos,       bg:'bg-gray-100',     text:'text-gray-400',     filter:'hidden' },
         ].map(s => (
-          <div key={s.label} className={`${s.bg} rounded-xl p-5`}>
+          <button key={s.label} onClick={() => onNavigate('products', s.filter)}
+            className={`${s.bg} rounded-xl p-5 text-left hover:scale-[1.02] transition-transform`}>
             <p className={`text-3xl font-bold ${s.text}`}>{s.value}</p>
             <p className={`text-xs mt-1 ${s.text} opacity-70`}>{s.label}</p>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -623,14 +630,66 @@ function Dashboard({ config, onNavigate }) {
         </div>
       </div>
 
+      {/* Importación */}
+      <div>
+        <p className="text-[11px] font-bold tracking-widest uppercase text-[#8a6f4e] mb-4">Importar productos</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          {/* Botón único — productos mock */}
+          <div className="bg-white border border-[#e8ddd0] rounded-xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#4a3a31]/10 flex items-center justify-center flex-shrink-0">
+                <Package size={18} className="text-[#4a3a31]"/>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[#1a1209]">Importar catálogo inicial</p>
+                <p className="text-xs text-gray-400">Carga los {MOCK_PRODUCTS.length} productos de muestra. <strong>Una sola vez.</strong></p>
+              </div>
+            </div>
+            {importDone
+              ? <p className="text-xs text-green-600 font-medium flex items-center gap-1"><Check size={13}/> Productos importados correctamente</p>
+              : <button onClick={onImportMock} disabled={importing}
+                  className={`${S.btn} ${S.btnPrimary} text-xs w-full justify-center`}>
+                  {importing ? 'Importando...' : `Importar ${MOCK_PRODUCTS.length} productos`}
+                </button>
+            }
+          </div>
+
+          {/* CSV masivo */}
+          <div className="bg-white border border-[#e8ddd0] rounded-xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#c9a96e]/15 flex items-center justify-center flex-shrink-0">
+                <Grid size={18} className="text-[#c9a96e]"/>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[#1a1209]">Importación masiva CSV</p>
+                <p className="text-xs text-gray-400">Columnas: <code className="bg-gray-100 px-1 rounded">brand, name, price, category, image, stock</code></p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <a href="data:text/csv;charset=utf-8,brand,name,price,category,image,stock%0AABIB,Ejemplo,25.00,facial,,true"
+                download="plantilla_productos.csv"
+                className={`${S.btn} ${S.btnGhost} text-xs`}>
+                ↓ Plantilla
+              </a>
+              <label className={`${S.btn} ${S.btnPrimary} text-xs cursor-pointer`}>
+                ↑ Subir CSV
+                <input type="file" accept=".csv" onChange={onCSVImport} className="hidden"/>
+              </label>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       {/* Tip configuración avanzada */}
       <div className="flex items-start gap-4 bg-amber-50 border border-amber-100 rounded-xl p-5">
         <Settings size={20} className="text-amber-500 flex-shrink-0 mt-0.5"/>
         <div>
           <p className="text-sm font-semibold text-[#4a3a31]">Configuración avanzada — ⚙ arriba a la derecha</p>
           <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-            Hero (imagen/video de fondo), sección CTA "Tu rutina elevada.", Editorial "Glow the Korean Way", Reels,
-            colores de marca, WhatsApp, redes sociales y sección Nosotros. Son ajustes de estética que rara vez cambian.
+            Hero (imagen/video de fondo), sección CTA "Tu rutina, elevada.", Editorial "Glow the Korean Way", Reels,
+            colores de marca, WhatsApp, redes sociales y sección Nosotros.
           </p>
         </div>
       </div>
@@ -648,9 +707,12 @@ const MAIN_TABS = [
 export default function Admin() {
   const [config,       setConfig]       = useState(() => { const s=getAdminConfig(); return { ...DEFAULT_CONFIG, ...s, products: s.products ?? DEFAULT_CONFIG.products }; });
   const [activeTab,    setActiveTab]    = useState('dashboard');
+  const [activeFilter, setActiveFilter] = useState('all');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast,        setToast]        = useState(null);
   const [dirty,        setDirty]        = useState(false);
+  const [importDone,   setImportDone]   = useState(false);
+  const [importing,    setImporting]    = useState(false);
 
   const handleChange = useCallback(cfg => { setConfig(cfg); setDirty(true); }, []);
 
@@ -662,6 +724,59 @@ export default function Admin() {
     if (!window.confirm('¿Restaurar configuración por defecto? Perderás todos tus cambios.')) return;
     localStorage.removeItem(LS_KEY); setConfig(DEFAULT_CONFIG); setDirty(false);
     setToast('Configuración restaurada'); setTimeout(() => setToast(null), 2500);
+  };
+
+  // Navegar a tab con filtro opcional
+  const handleNavigate = (tab, filter) => {
+    setActiveTab(tab);
+    if (filter) setActiveFilter(filter);
+  };
+
+  // Importar productos mock — botón único
+  const handleImportMock = () => {
+    if (!window.confirm(`¿Importar ${MOCK_PRODUCTS.length} productos al admin? Esta acción agrega los productos del catálogo inicial.`)) return;
+    setImporting(true);
+    const existing = new Set((config.products || []).map(p => p.name));
+    const toAdd = MOCK_PRODUCTS
+      .filter(p => !existing.has(p.name))
+      .map(p => ({ ...p, description:'', inOffer:false, offerPrice:null, hasTon:false, tonValue:'', visible:true, lowStock:false }));
+    handleChange({ ...config, products: [...(config.products||[]), ...toAdd] });
+    setImporting(false);
+    setImportDone(true);
+    setToast(`✅ ${toAdd.length} productos importados`); setTimeout(() => setToast(null), 3000);
+  };
+
+  // Importar CSV
+  const handleCSVImport = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const text  = await file.text();
+    const lines = text.trim().split('\n');
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const newProds = [];
+    for (let i = 1; i < lines.length; i++) {
+      const vals = lines[i].split(',');
+      const row  = {};
+      headers.forEach((h, idx) => { row[h] = vals[idx]?.trim() || ''; });
+      if (!row.name) continue;
+      newProds.push({
+        id: Date.now() + i,
+        brand:    row.brand    || '',
+        name:     row.name     || '',
+        price:    parseFloat(row.price) || 0,
+        category: row.category || 'facial',
+        image:    row.image    || '',
+        images:   row.image ? [row.image] : [],
+        stock:    row.stock !== 'false',
+        featured: row.featured === 'true',
+        inOffer:  false, offerPrice: null,
+        hasTon:   false, tonValue: '',
+        visible:  true,  lowStock: false,
+        description: '', rating: 4.5, reviews: 0,
+      });
+    }
+    handleChange({ ...config, products: [...(config.products||[]), ...newProds] });
+    setToast(`✅ ${newProds.length} productos importados desde CSV`); setTimeout(() => setToast(null), 3000);
+    e.target.value = '';
   };
 
   return (
@@ -714,8 +829,8 @@ export default function Admin() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 md:px-8 py-8">
-        {activeTab === 'dashboard'  && <Dashboard config={config} onNavigate={setActiveTab}/>}
-        {activeTab === 'products'   && <ProductsSection config={config} onChange={handleChange}/>}
+        {activeTab === 'dashboard'  && <Dashboard config={config} onNavigate={handleNavigate} onImportMock={handleImportMock} onCSVImport={handleCSVImport} importing={importing} importDone={importDone} />}
+        {activeTab === 'products'   && <ProductsSection config={config} onChange={handleChange} initialFilter={activeFilter}/>}
         {activeTab === 'categories' && <CategoriesSection config={config} onChange={handleChange}/>}
       </main>
 

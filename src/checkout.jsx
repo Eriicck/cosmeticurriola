@@ -1,3 +1,4 @@
+import { saveOrder } from './firebase.jsx';
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Truck, Store, ChevronDown, ChevronUp, MessageCircle, CheckCircle, ShoppingCart } from 'lucide-react';
@@ -49,7 +50,7 @@ export default function Checkout({ cart = [], cartCount = 0, onOpenCart }) {
     return errs;
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
@@ -71,6 +72,8 @@ export default function Checkout({ cart = [], cartCount = 0, onOpenCart }) {
     msg += `\n*🛍️ Pedido (${cartCount} artículos):*\n${items}\n`;
     msg += `\n*💰 Total: $${cartTotal.toFixed(2)} USD*\n\n¡Quedo a la espera de la confirmación! 🙏`;
 
+
+    await saveOrder({ form, cart, total: cartTotal });
     window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank');
     setSubmitted(true);
   };

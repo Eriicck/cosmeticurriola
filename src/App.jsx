@@ -4,7 +4,8 @@ import CartDrawer from './CartDrawer';
 import Index     from './index';
 import Products  from './products';
 import Checkout  from './checkout';
-import Admin     from './Admin';
+import Admin      from './Admin';
+import AdminLogin from './AdminLogin';
 
 export default function App() {
   const [cart, setCart]             = useState([]);
@@ -62,8 +63,8 @@ export default function App() {
         <Route path="/"         element={<Index    {...cartProps} />} />
         <Route path="/products" element={<Products {...cartProps} />} />
         <Route path="/checkout" element={<Checkout cart={cart} />} />
-        {/* Aquí agregamos la ruta para que React sepa qué abrir en /admin */}
-        <Route path="/admin"    element={<Admin />} />
+<Route path="/admin/login" element={<AdminLogin />} />
+<Route path="/admin"       element={<Admin />} />
       </Routes>
     </BrowserRouter>
   );

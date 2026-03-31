@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback , useEffect } from 'react';
+import { getProducts } from './firebase.jsx';
 import { useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Search, SlidersHorizontal, X,
@@ -220,7 +221,15 @@ export default function Products({ cartCount = 0, onAddToCart, onOpenCart }) {
   // Marcas únicas de los productos visibles
   const ALL_BRANDS = [...new Set(ALL_PRODUCTS.map(p => p.brand))].sort();
 
-  const [search,          setSearch]          = useState('');
+  const [products,  setProducts]  = useState([]);
+const [loading,   setLoading]   = useState(true);
+const [search,    setSearch]    = useState('');
+
+useEffect(() => {
+  getProducts()
+    .then(data => { setProducts(data); setLoading(false); })
+    .catch(() => setLoading(false));
+}, []);
   const [selectedBrands,  setSelectedBrands]  = useState([]);
   const [minPrice,        setMinPrice]        = useState('');
   const [maxPrice,        setMaxPrice]        = useState('');
@@ -230,7 +239,7 @@ export default function Products({ cartCount = 0, onAddToCart, onOpenCart }) {
   const [selectedProduct, setSelectedProduct] = useState(null);
 
   const filtered = useMemo(() => {
-    let list = ALL_PRODUCTS.filter(p => {
+    let list = products.filter(p => {
       const q     = search.toLowerCase();
       const ok    = p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q);
       const brand = selectedBrands.length === 0 || selectedBrands.includes(p.brand);
