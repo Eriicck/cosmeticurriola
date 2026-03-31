@@ -1,6 +1,6 @@
 /**
  * ADMIN.JSX — Panel de control U.RRIOLA
- * getAdminConfig() es usado por index.jsx y products.jsx
+ * getAdminConfig() es usado por index.jsx y pronbnducts.jsx
  */
 
 import React, { useState, useCallback, useMemo } from 'react';
