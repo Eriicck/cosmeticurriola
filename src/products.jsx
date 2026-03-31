@@ -4,7 +4,7 @@ import {
   ShoppingCart, Search, SlidersHorizontal, X,
   Plus, Minus, ChevronLeft, ChevronRight, Star
 } from 'lucide-react';
-import { getAdminConfig } from './admin';
+import { getAdminConfig } from './Admin';
 
 const ITEMS_PER_PAGE = 16;
 const SORT_OPTIONS   = ['Destacados', 'Precio: menor a mayor', 'Precio: mayor a menor', 'Más nuevos'];

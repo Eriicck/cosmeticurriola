@@ -4,7 +4,7 @@ import CartDrawer from './CartDrawer';
 import Index     from './index';
 import Products  from './products';
 import Checkout  from './checkout';
-import Admin     from './admin';
+import Admin     from './Admin';
 
 export default function App() {
   const [cart, setCart]             = useState([]);
@@ -63,7 +63,7 @@ export default function App() {
         <Route path="/products" element={<Products {...cartProps} />} />
         <Route path="/checkout" element={<Checkout cart={cart} cartCount={cartCount} onOpenCart={() => setIsCartOpen(true)} />} />
         {/* Panel de administración */}
-        <Route path="/admin"    element={<Admin />} />
+        <Route path="/Admin"    element={<Admin />} />
         <Route path="*"         element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

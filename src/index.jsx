@@ -4,7 +4,7 @@ import {
   ShoppingCart, Menu, X, ChevronRight,
   Volume2, VolumeX, Instagram, Facebook, ArrowRight, Sparkles
 } from 'lucide-react';
-import { getAdminConfig } from './admin';
+import { getAdminConfig } from './Admin';
 
 // ─── MARCAS (pueden pasarse a admin si querés en el futuro) ──────────────────
 const BRANDS = ['ABIB','ANUA','APLB','BEAUTY OF JOSEON','COSRX','INNISFREE','SOME BY MI','ISNTREE','KLAIRS','ROUND LAB','TORRIDEN','AXIS-Y','PURITO','DR. JART+','MEDIHEAL'];
