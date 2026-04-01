@@ -14,6 +14,8 @@ import {
   Search, Film, FileImage, Layout, LogOut
 } from 'lucide-react';
 import { MOCK_PRODUCTS, WHATSAPP_NUMBER } from './data';
+import { createProduct } from './firebase'; 
+import * as XLSX from 'xlsx';
 
 // ─── PERSISTENCIA ─────────────────────────────────────────────────────────────
 const LS_KEY = 'urriola_admin_config';
