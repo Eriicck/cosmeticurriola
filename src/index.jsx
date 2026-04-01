@@ -145,7 +145,7 @@ export default function Index({ cartCount = 0, onOpenCart }) {
 
   // ── Hero background ────────────────────────────────────────────────────────
   // URL del video MP4 (compatible con iOS Safari, Android, Chrome, Firefox)
-  const MP4_URL = 'https://firebasestorage.googleapis.com/v0/b/pedido-digital-online.firebasestorage.app/o/urriolaheader.mp4?alt=media&token=cfa95324-3522-4f84-9c4d-26868e6f585f';
+  const MP4_URL = 'https://res.cloudinary.com/dls6empbg/video/upload/v1775022470/urriolaheader_yse1xf.mp4';
 
   const renderHeroBg = () => {
     if (hero.type === 'video') {
