@@ -144,13 +144,8 @@ export default function Index({ cartCount = 0, onOpenCart }) {
   };
 
   // ── Hero background ────────────────────────────────────────────────────────
-  // URL del video MP4 (compatible con iOS Safari, Android, Chrome, Firefox)
-  const MP4_URL = 'https://res.cloudinary.com/dls6empbg/video/upload/v1775022470/urriolaheader_yse1xf.mp4';
-
   const renderHeroBg = () => {
-    if (hero.type === 'video') {
-      // Usamos el MP4 siempre — es compatible con todos los navegadores
-      const videoSrc = MP4_URL;
+    if (hero.type === 'video' && hero.src) {
       return (
         <video
           ref={heroVideoRef}
@@ -162,7 +157,7 @@ export default function Index({ cartCount = 0, onOpenCart }) {
           className="absolute inset-0 w-full h-full object-cover object-center"
           style={{ WebkitPlaysinline: true }}
         >
-          <source src={videoSrc} type="video/mp4" />
+          <source src={hero.src} type="video/mp4" />
         </video>
       );
     }
