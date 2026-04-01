@@ -32,6 +32,16 @@ function ProductModal({ product, onClose, onAddToCart }) {
 
   useEffect(() => { setQty(1); setActiveImg(0); }, [product]);
 
+  // Bloquear scroll del fondo cuando el modal está abierto
+  useEffect(() => {
+    if (product) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [product]);
+
   if (!product) return null;
 
   const images = (product.images && product.images.length > 0)
@@ -41,80 +51,118 @@ function ProductModal({ product, onClose, onAddToCart }) {
   const displayPrice = product.inOffer && product.offerPrice ? product.offerPrice : product.price;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6">
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full md:max-w-3xl bg-white rounded-t-3xl md:rounded-2xl overflow-hidden shadow-2xl max-h-[92dvh] overflow-y-auto">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 md:p-8">
+      {/* Backdrop — click cierra */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal — centrado, no más slide desde abajo */}
+      <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row"
+        style={{ maxHeight: '90dvh' }}>
+
+        {/* Botón cerrar */}
         <button onClick={onClose}
-          className="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors">
-          <X size={17} className="text-gray-600" />
+          className="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-white/90 backdrop-blur-sm shadow-md flex items-center justify-center hover:bg-white transition-colors border border-gray-100">
+          <X size={17} className="text-gray-700" />
         </button>
-        <div className="grid md:grid-cols-2">
-          <div className="relative bg-gray-50" style={{ aspectRatio: '1' }}>
-            <img src={images[activeImg]} alt={product.name} className="w-full h-full object-cover object-center" />
-            {images.length > 1 && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-                {images.map((_, i) => (
-                  <button key={i} onClick={() => setActiveImg(i)}
-                    className={`h-1.5 rounded-full transition-all duration-300 ${i === activeImg ? 'bg-[#4a3a31] w-6' : 'bg-[#4a3a31]/25 w-1.5'}`} />
+
+        {/* Galería izquierda */}
+        <div className="relative bg-[#f7f3ee] flex-shrink-0 md:w-[45%]" style={{ aspectRatio: '1' }}>
+          <img
+            src={images[activeImg]}
+            alt={product.name}
+            className="w-full h-full object-cover object-center"
+          />
+          {/* Badge oferta */}
+          {product.inOffer && (
+            <div className="absolute top-4 left-4 bg-[#c9a96e] text-white text-[9px] font-bold tracking-widest uppercase px-3 py-1 rounded-full">
+              Oferta
+            </div>
+          )}
+          {/* Dots navegación galería */}
+          {images.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
+              {images.map((_, i) => (
+                <button key={i} onClick={() => setActiveImg(i)}
+                  className={`h-1.5 rounded-full transition-all duration-300 ${i === activeImg ? 'bg-[#4a3a31] w-6' : 'bg-[#4a3a31]/25 w-1.5'}`} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Info derecha — scrolleable independientemente */}
+        <div className="flex-1 overflow-y-auto p-6 md:p-8 flex flex-col">
+          <div className="flex-1">
+            <span className="text-[10px] font-bold text-[#b8986a] tracking-widest uppercase">{product.brand}</span>
+            <h2 className="text-xl md:text-2xl font-light text-gray-900 mt-2 leading-snug"
+              style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+              {product.name}
+            </h2>
+
+            {/* Estrellas */}
+            <div className="flex items-center gap-2 mt-2">
+              <div className="flex">
+                {[...Array(5)].map((_, i) => (
+                  <Star key={i} size={11} className={i < Math.floor(product.rating || 4) ? 'fill-[#c9a96e] text-[#c9a96e]' : 'fill-gray-200 text-gray-200'} />
                 ))}
+              </div>
+              <span className="text-xs text-gray-400">({product.reviews || 0})</span>
+            </div>
+
+            {/* Precio */}
+            <div className="flex items-baseline gap-3 mt-5 pb-5 border-b border-gray-100">
+              {product.inOffer && product.offerPrice ? (
+                <>
+                  <p className="text-3xl font-bold text-[#c9a96e]">${Number(product.offerPrice).toFixed(2)} <span className="text-sm font-normal text-gray-400">USD</span></p>
+                  <p className="text-base text-gray-400 line-through">${Number(product.price).toFixed(2)}</p>
+                </>
+              ) : (
+                <p className="text-3xl font-bold text-gray-900">${Number(product.price).toFixed(2)} <span className="text-sm font-normal text-gray-400">USD</span></p>
+              )}
+            </div>
+
+            {/* Descripción */}
+            <p className="text-sm text-gray-500 mt-5 leading-relaxed">
+              {product.description || 'Producto K-Beauty premium. Formulado con ingredientes activos para resultados visibles desde la primera semana de uso.'}
+            </p>
+
+            {/* Ton */}
+            {product.hasTon && product.tonValue && (
+              <div className="mt-4 inline-flex items-center gap-2 bg-purple-50 text-purple-600 text-xs font-medium px-3 py-1.5 rounded-full">
+                🎨 Ton: {product.tonValue}
               </div>
             )}
           </div>
-          <div className="p-6 md:p-8 flex flex-col justify-between">
-            <div>
-              <span className="text-[10px] font-bold text-[#b8986a] tracking-widest uppercase">{product.brand}</span>
-              <h2 className="text-xl md:text-2xl font-light text-gray-900 mt-2 leading-snug" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
-                {product.name}
-              </h2>
-              <div className="flex items-center gap-2 mt-2">
-                <div className="flex">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} size={11} className={i < Math.floor(product.rating || 4) ? 'fill-[#c9a96e] text-[#c9a96e]' : 'fill-gray-200 text-gray-200'} />
-                  ))}
-                </div>
-                <span className="text-xs text-gray-400">({product.reviews || 0})</span>
+
+          {/* CTA fijo al fondo */}
+          <div className="mt-6 pt-5 border-t border-gray-100 space-y-3">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center border border-gray-200 rounded-xl h-11 overflow-hidden">
+                <button onClick={() => setQty(q => Math.max(1, q - 1))}
+                  className="px-4 text-gray-500 hover:bg-gray-50 h-full transition-colors flex items-center">
+                  <Minus size={14} />
+                </button>
+                <span className="w-8 text-center text-sm font-semibold">{qty}</span>
+                <button onClick={() => setQty(q => q + 1)}
+                  className="px-4 text-gray-500 hover:bg-gray-50 h-full transition-colors flex items-center">
+                  <Plus size={14} />
+                </button>
               </div>
-              <div className="flex items-baseline gap-3 mt-4">
-                {product.inOffer && product.offerPrice ? (
-                  <>
-                    <p className="text-2xl font-bold text-[#c9a96e]">${Number(product.offerPrice).toFixed(2)} <span className="text-sm font-normal text-gray-400">USD</span></p>
-                    <p className="text-base text-gray-400 line-through">${Number(product.price).toFixed(2)}</p>
-                  </>
-                ) : (
-                  <p className="text-2xl font-bold text-gray-900">${Number(product.price).toFixed(2)} <span className="text-sm font-normal text-gray-400">USD</span></p>
-                )}
-              </div>
-              <p className="text-sm text-gray-500 mt-4 leading-relaxed">
-                {product.description || 'Producto K-Beauty premium. Formulado con ingredientes activos para resultados visibles.'}
-              </p>
-              {product.hasTon && product.tonValue && (
-                <div className="mt-3 inline-flex items-center gap-2 bg-purple-50 text-purple-600 text-xs font-medium px-3 py-1 rounded-full">
-                  🎨 Ton: {product.tonValue}
-                </div>
-              )}
+              {product.stock !== false
+                ? <span className="text-xs text-green-600 font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" /> En stock</span>
+                : <span className="text-xs text-red-400 font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" /> Sin stock</span>}
             </div>
-            <div className="mt-6 space-y-3">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center border border-gray-200 rounded-lg h-10 overflow-hidden">
-                  <button onClick={() => setQty(q => Math.max(1, q - 1))} className="px-3 text-gray-500 hover:bg-gray-50 h-full transition-colors flex items-center"><Minus size={14} /></button>
-                  <span className="w-8 text-center text-sm font-medium">{qty}</span>
-                  <button onClick={() => setQty(q => q + 1)} className="px-3 text-gray-500 hover:bg-gray-50 h-full transition-colors flex items-center"><Plus size={14} /></button>
-                </div>
-                {product.stock !== false
-                  ? <span className="text-xs text-green-600 font-medium">● En stock</span>
-                  : <span className="text-xs text-red-400 font-medium">● Sin stock</span>}
-              </div>
-              <button
-                disabled={product.stock === false}
-                onClick={() => { if (product.stock !== false) { onAddToCart(product, qty); onClose(); } }}
-                className={`w-full text-white py-3.5 text-sm font-bold tracking-widest rounded-xl transition-all duration-300 shadow-md flex items-center justify-center gap-2
-                  ${product.stock !== false ? 'bg-[#4a3a31] hover:bg-[#382b24] hover:shadow-lg' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
-                <ShoppingCart size={16} strokeWidth={1.5} />
-                {product.stock !== false
-                  ? `Añadir — $${(Number(displayPrice) * qty).toFixed(2)} USD`
-                  : 'Sin stock'}
-              </button>
-            </div>
+            <button
+              disabled={product.stock === false}
+              onClick={() => { if (product.stock !== false) { onAddToCart(product, qty); onClose(); } }}
+              className={`w-full text-white py-4 text-sm font-bold tracking-widest rounded-xl transition-all duration-300 flex items-center justify-center gap-2
+                ${product.stock !== false
+                  ? 'bg-[#4a3a31] hover:bg-[#c9a96e] shadow-md hover:shadow-lg cursor-pointer'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+              <ShoppingCart size={16} strokeWidth={1.5} />
+              {product.stock !== false
+                ? `Añadir al carrito — $${(Number(displayPrice) * qty).toFixed(2)} USD`
+                : 'Sin stock'}
+            </button>
           </div>
         </div>
       </div>

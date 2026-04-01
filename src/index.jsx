@@ -36,7 +36,7 @@ function ReelCard({ reel }) {
       style={{ aspectRatio: '9/16' }} onClick={togglePlay}>
       <video ref={videoRef} src={reel.src} poster={reel.thumb}
         muted loop playsInline preload="none"
-        className="absolute inset-0 w-full h-full object-cover" />
+        className="absolute inset-0 w-full h-full object-cover object-center" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
       {!playing && (
         <div className="absolute inset-0 flex items-center justify-center">
@@ -107,8 +107,13 @@ export default function Index({ cartCount = 0, onOpenCart }) {
     v.setAttribute('webkit-playsinline', '');
     const tryPlay = () => v.play().catch(() => {});
     tryPlay();
+    // iOS necesita un gesto del usuario la primera vez
     document.addEventListener('touchstart', tryPlay, { once: true });
-    return () => document.removeEventListener('touchstart', tryPlay);
+    document.addEventListener('touchend',   tryPlay, { once: true });
+    return () => {
+      document.removeEventListener('touchstart', tryPlay);
+      document.removeEventListener('touchend',   tryPlay);
+    };
   }, [hero.type, hero.src]);
 
   // ── Autoplay editorial ─────────────────────────────────────────────────────
@@ -139,21 +144,26 @@ export default function Index({ cartCount = 0, onOpenCart }) {
   };
 
   // ── Hero background ────────────────────────────────────────────────────────
+  // URL del video MP4 (compatible con iOS Safari, Android, Chrome, Firefox)
+  const MP4_URL = 'https://firebasestorage.googleapis.com/v0/b/pedido-digital-online.firebasestorage.app/o/urriolaheader.mp4?alt=media&token=cfa95324-3522-4f84-9c4d-26868e6f585f';
+
   const renderHeroBg = () => {
-    if (hero.type === 'video' && hero.src) {
+    if (hero.type === 'video') {
+      // Usamos el MP4 siempre — es compatible con todos los navegadores
+      const videoSrc = MP4_URL;
       return (
-        // Sin parallax wrapper en el video para evitar bugs en iOS
         <video
           ref={heroVideoRef}
-          src={hero.src}
           autoPlay
           muted
           loop
           playsInline
           preload="auto"
-          className="absolute inset-0 w-full h-full object-cover"
-          style={{ objectFit: 'cover' }}
-        />
+          className="absolute inset-0 w-full h-full object-cover object-center"
+          style={{ WebkitPlaysinline: true }}
+        >
+          <source src={videoSrc} type="video/mp4" />
+        </video>
       );
     }
     return (

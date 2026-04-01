@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, ShoppingCart, Plus, Minus, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -6,6 +6,16 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
   const navigate  = useNavigate();
   const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  // Bloquear scroll del fondo cuando el drawer está abierto
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isOpen]);
 
   const handleCheckout = () => {
     onClose();
@@ -16,7 +26,7 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className="fixed inset-0 z-[60] flex">
       {/* Backdrop — click cierra */}
       <div
         className="fixed inset-0 bg-black/40 backdrop-blur-sm"
