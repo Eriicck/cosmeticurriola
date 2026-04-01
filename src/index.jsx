@@ -131,10 +131,17 @@ export default function Index({ cartCount = 0, onOpenCart }) {
       return (
         <div ref={heroImgRef} className="absolute w-full will-change-transform" style={{ top: '-12%', height: '124%' }}>
           <video
-            src={hero.src}
-            autoPlay muted loop playsInline
-            className="w-full h-full object-cover object-center"
-          />
+  autoPlay
+  muted
+  loop
+  playsInline
+  preload="metadata"
+  className="absolute inset-0 w-full h-full object-cover"
+  ref={el => { if (el) { el.muted = true; el.play().catch(() => {}); } }}
+>
+  <source src={heroSrc} type="video/webm" />
+  <source src={heroSrc} type="video/mp4" />
+</video>
         </div>
       );
     }
