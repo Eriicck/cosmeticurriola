@@ -366,6 +366,7 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
   const [page,      setPage]      = useState(1);
   const [editingId, setEditingId] = useState(null);
   const [editBuf,   setEditBuf]   = useState(null);
+  const [selected,  setSelected]  = useState(new Set()); // IDs seleccionados
 
   const prods = config.products || [];
 
@@ -391,8 +392,20 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
     onChange({ ...config, products: prods.map(p => p.id === editingId ? editBuf : p) });
     setEditingId(null); setEditBuf(null);
   };
-  const quickToggle  = (id, key) => onChange({ ...config, products: prods.map(p => p.id===id ? {...p,[key]:!p[key]} : p) });
-  const removeProduct = id => onChange({ ...config, products: prods.filter(p => p.id !== id) });
+  const quickToggle   = (id, key) => onChange({ ...config, products: prods.map(p => p.id===id ? {...p,[key]:!p[key]} : p) });
+  const removeProduct  = id => onChange({ ...config, products: prods.filter(p => p.id !== id) });
+  const removeSelected = () => {
+    if (!window.confirm(`¿Eliminar ${selected.size} productos seleccionados?`)) return;
+    onChange({ ...config, products: prods.filter(p => !selected.has(p.id)) });
+    setSelected(new Set());
+  };
+  const toggleSelect = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const selectAll  = () => setSelected(new Set(paginated.map(p => p.id)));
+  const selectNone = () => setSelected(new Set());
   const addProduct   = () => {
     const np = { id: Date.now(), brand:'NUEVA MARCA', name:'Nuevo producto', price:0, image:'', images:[],
       stock:true, inOffer:false, offerPrice:null, hasTon:false, tonValue:'', visible:true,
@@ -432,6 +445,24 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
       </div>
 
       <p className="text-xs text-gray-400">{filtered.length} resultado{filtered.length!==1?'s':''} · pág {page}/{totalPages||1}</p>
+
+      {/* Barra de selección múltiple */}
+      {selected.size > 0 && (
+        <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <span className="text-sm font-medium text-red-600">{selected.size} producto{selected.size!==1?'s':''} seleccionado{selected.size!==1?'s':''}</span>
+          <div className="flex gap-2">
+            <button onClick={selectNone} className={`${S.btn} ${S.btnGhost} text-xs`}><X size={12}/> Deseleccionar</button>
+            <button onClick={removeSelected} className={`${S.btn} text-xs bg-red-500 text-white hover:bg-red-600`}><Trash2 size={12}/> Eliminar {selected.size}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Seleccionar todos de la página */}
+      {paginated.length > 0 && selected.size === 0 && (
+        <button onClick={selectAll} className="text-xs text-[#c9a96e] hover:underline text-left">
+          Seleccionar todos en esta página ({paginated.length})
+        </button>
+      )}
 
       <div className="space-y-2">
         {paginated.map(p => (
@@ -488,6 +519,14 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
               </div>
             ) : (
               <div className="flex items-center gap-3">
+                {/* Checkbox selección */}
+                <input
+                  type="checkbox"
+                  checked={selected.has(p.id)}
+                  onChange={() => toggleSelect(p.id)}
+                  onClick={e => e.stopPropagation()}
+                  className="w-4 h-4 rounded accent-gray-900 flex-shrink-0 cursor-pointer"
+                />
                 <div className="w-10 h-14 rounded-md overflow-hidden bg-gray-100 flex-shrink-0">
                   {p.image
                     ? <img src={p.image} className="w-full h-full object-cover" alt=""/>
@@ -791,12 +830,15 @@ export default function Admin() {
     const text  = await file.text();
     const lines = text.trim().split('\n');
     const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const existingNames = new Set((config.products || []).map(p => p.name?.trim().toLowerCase()));
     const newProds = [];
     for (let i = 1; i < lines.length; i++) {
       const vals = lines[i].split(',');
       const row  = {};
       headers.forEach((h, idx) => { row[h] = vals[idx]?.trim() || ''; });
       if (!row.name) continue;
+      // Saltar si ya existe con ese nombre
+      if (existingNames.has(row.name.trim().toLowerCase())) continue;
       newProds.push({
         id: Date.now() + i,
         brand:    row.brand    || '',

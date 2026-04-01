@@ -1,11 +1,10 @@
-import React, { useState, useMemo, useCallback , useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { getProducts } from './firebase.jsx';
 import { useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Search, SlidersHorizontal, X,
   Plus, Minus, ChevronLeft, ChevronRight, Star
 } from 'lucide-react';
-import { getAdminConfig } from './Admin';
 
 const ITEMS_PER_PAGE = 16;
 const SORT_OPTIONS   = ['Destacados', 'Precio: menor a mayor', 'Precio: mayor a menor', 'Más nuevos'];
@@ -214,23 +213,11 @@ function ProductCard({ product, onAddToCart, onOpenModal }) {
 export default function Products({ cartCount = 0, onAddToCart, onOpenCart }) {
   const navigate = useNavigate();
 
-  // Leer config del admin
-  const cfg = getAdminConfig();
-  // Solo productos visibles
-  const ALL_PRODUCTS = (cfg.products || []).filter(p => p.visible !== false);
-  // Marcas únicas de los productos visibles
-  const ALL_BRANDS = [...new Set(ALL_PRODUCTS.map(p => p.brand))].sort();
-
-  const [products,  setProducts]  = useState([]);
-const [loading,   setLoading]   = useState(true);
-const [search,    setSearch]    = useState('');
-
-useEffect(() => {
-  getProducts()
-    .then(data => { setProducts(data); setLoading(false); })
-    .catch(() => setLoading(false));
-}, []);
+  const [products,        setProducts]        = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [search,          setSearch]          = useState('');
   const [selectedBrands,  setSelectedBrands]  = useState([]);
+  const [selectedCats,    setSelectedCats]    = useState([]);
   const [minPrice,        setMinPrice]        = useState('');
   const [maxPrice,        setMaxPrice]        = useState('');
   const [sortBy,          setSortBy]          = useState('Destacados');
@@ -238,20 +225,42 @@ useEffect(() => {
   const [filterOpen,      setFilterOpen]      = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
+  // Cargar desde Firebase — deduplicar por nombre
+  useEffect(() => {
+    getProducts()
+      .then(data => {
+        const seen = new Set();
+        const deduped = data.filter(p => {
+          const key = p.name?.trim().toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return p.visible !== false;
+        });
+        setProducts(deduped);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  // Marcas y categorías únicas de los productos cargados
+  const ALL_BRANDS = [...new Set(products.map(p => p.brand).filter(Boolean))].sort();
+  const ALL_CATS   = [...new Set(products.map(p => p.category).filter(Boolean))].sort();
+
   const filtered = useMemo(() => {
+    const getPrice = p => p.inOffer && p.offerPrice ? p.offerPrice : p.price;
     let list = products.filter(p => {
       const q     = search.toLowerCase();
-      const ok    = p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q);
+      const ok    = p.name?.toLowerCase().includes(q) || p.brand?.toLowerCase().includes(q);
       const brand = selectedBrands.length === 0 || selectedBrands.includes(p.brand);
-      const price = product => product.inOffer && product.offerPrice ? product.offerPrice : product.price;
-      const min   = minPrice === '' || price(p) >= Number(minPrice);
-      const max   = maxPrice === '' || price(p) <= Number(maxPrice);
-      return ok && brand && min && max;
+      const cat   = selectedCats.length === 0   || selectedCats.includes(p.category);
+      const min   = minPrice === '' || getPrice(p) >= Number(minPrice);
+      const max   = maxPrice === '' || getPrice(p) <= Number(maxPrice);
+      return ok && brand && cat && min && max;
     });
     if (sortBy === 'Precio: menor a mayor') list = [...list].sort((a, b) => (a.inOffer && a.offerPrice ? a.offerPrice : a.price) - (b.inOffer && b.offerPrice ? b.offerPrice : b.price));
     if (sortBy === 'Precio: mayor a menor') list = [...list].sort((a, b) => (b.inOffer && b.offerPrice ? b.offerPrice : b.price) - (a.inOffer && a.offerPrice ? a.offerPrice : a.price));
     return list;
-  }, [search, selectedBrands, minPrice, maxPrice, sortBy, ALL_PRODUCTS]);
+  }, [search, selectedBrands, selectedCats, minPrice, maxPrice, sortBy, products]);
 
   const totalPages      = Math.ceil(filtered.length / ITEMS_PER_PAGE);
   const currentProducts = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
@@ -266,11 +275,16 @@ useEffect(() => {
     setCurrentPage(1);
   };
 
-  const clearFilters = () => {
-    setSearch(''); setSelectedBrands([]); setMinPrice(''); setMaxPrice(''); setSortBy('Destacados'); setCurrentPage(1);
+  const toggleCat = (cat) => {
+    setSelectedCats(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
+    setCurrentPage(1);
   };
 
-  const hasFilters = search || selectedBrands.length > 0 || minPrice || maxPrice;
+  const clearFilters = () => {
+    setSearch(''); setSelectedBrands([]); setSelectedCats([]); setMinPrice(''); setMaxPrice(''); setSortBy('Destacados'); setCurrentPage(1);
+  };
+
+  const hasFilters = search || selectedBrands.length > 0 || selectedCats.length > 0 || minPrice || maxPrice;
 
   return (
     <div className="min-h-screen bg-white font-sans text-gray-900">
@@ -400,6 +414,16 @@ useEffect(() => {
               <button onClick={() => setFilterOpen(false)} className="text-gray-400 hover:text-gray-900 transition-colors"><X size={18} /></button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-4">
+              <Accordion title="Categorías" defaultOpen>
+                <div className="space-y-3 pt-1">
+                  {ALL_CATS.map(c => (
+                    <label key={c} className="flex items-center gap-3 cursor-pointer group">
+                      <input type="checkbox" checked={selectedCats.includes(c)} onChange={() => toggleCat(c)} className="w-4 h-4 rounded accent-gray-900" />
+                      <span className="text-sm text-gray-600 group-hover:text-gray-900 transition-colors capitalize">{c}</span>
+                    </label>
+                  ))}
+                </div>
+              </Accordion>
               <Accordion title="Precio">
                 <div className="flex items-center gap-3 pt-2">
                   <div className="flex items-center border border-gray-200 rounded-md p-2 flex-1 focus-within:border-gray-900 transition-colors">

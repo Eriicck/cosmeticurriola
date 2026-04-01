@@ -131,17 +131,24 @@ export default function Index({ cartCount = 0, onOpenCart }) {
       return (
         <div ref={heroImgRef} className="absolute w-full will-change-transform" style={{ top: '-12%', height: '124%' }}>
           <video
-  autoPlay
-  muted
-  loop
-  playsInline
-  preload="metadata"
-  className="absolute inset-0 w-full h-full object-cover"
-  ref={el => { if (el) { el.muted = true; el.play().catch(() => {}); } }}
->
-  <source src={heroSrc} type="video/webm" />
-  <source src={heroSrc} type="video/mp4" />
-</video>
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
+            className="absolute inset-0 w-full h-full object-cover"
+            ref={el => {
+              if (el) {
+                el.muted = true;
+                el.defaultMuted = true;
+                el.setAttribute('muted', '');
+                el.play().catch(() => {});
+              }
+            }}
+          >
+            <source src={hero.src} type="video/webm" />
+            <source src={hero.src} type="video/mp4" />
+          </video>
         </div>
       );
     }
@@ -165,9 +172,10 @@ export default function Index({ cartCount = 0, onOpenCart }) {
   };
 
   return (
-    <div className="bg-[#faf8f5] overflow-x-hidden" style={{ fontFamily: "'Jost', sans-serif" }}>
+    <div className="bg-[#faf8f5] overflow-x-hidden" style={{ fontFamily: "'Jost', sans-serif", margin: 0, padding: 0 }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Jost:wght@300;400;500;600&display=swap');
+        html, body, #root { margin: 0; padding: 0; }
         .font-display { font-family: 'Cormorant Garamond', Georgia, serif !important; }
         @keyframes marquee  { from { transform: translateX(0); } to { transform: translateX(-50%); } }
         @keyframes fadeUp   { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
