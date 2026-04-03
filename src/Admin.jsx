@@ -1,9 +1,12 @@
 /**
- * ADMIN.JSX — Panel de control U.RRIOLA v2
- * getAdminConfig() es usado, por index.jsx y pronbnducts.jsx
+ * ADMIN.JSX — Panel de control U.RRIOLA
+ * - Productos se sincronizan a Firebase al guardar
+ * - Hero: imagen/video por URL o subida a Cloudinary
+ * - Input numérico corregido (sin bug "01")
+ * - getAdminConfig() exportado para index.jsx
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAuth, signOut } from 'firebase/auth';
 import {
@@ -11,13 +14,16 @@ import {
   Edit2, Save, X, ChevronUp, ChevronDown, Eye, EyeOff,
   Tag, ToggleLeft, ToggleRight, Check, AlertCircle, Layers,
   Palette, RefreshCw, ChevronLeft, ChevronRight, Home,
-  Search, Film, FileImage, Layout, LogOut
+  Search, Film, FileImage, Layout, LogOut, Upload, Link
 } from 'lucide-react';
 import { MOCK_PRODUCTS, WHATSAPP_NUMBER } from './data';
-import { createProduct } from './firebase'; 
-import * as XLSX from 'xlsx';
+import {
+  syncProductsToFirebase, patchProduct,
+  deleteProduct as deleteProductFromFirebase,
+  createProduct, uploadToCloudinary
+} from './firebase';
 
-// ─── PERSISTENCIA ─────────────────────────────────────────────────────────────
+// ─── PERSISTENCIA (todo excepto productos) ────────────────────────────────────
 const LS_KEY = 'urriola_admin_config';
 
 export function getAdminConfig() {
@@ -65,10 +71,7 @@ const DEFAULT_CONFIG = {
   ],
   reelsEyebrow: 'Descubrí',
   reelsTitle: 'K-Beauty en acción',
-  products: MOCK_PRODUCTS.map(p => ({
-    ...p, description: '', inOffer: false, offerPrice: null,
-    hasTon: false, tonValue: '', visible: true,
-  })),
+  // productos NO se guardan en localStorage — viven en Firebase
   general: {
     whatsapp: WHATSAPP_NUMBER,
     brandColor: '#c9a96e', darkColor: '#4a3a31',
@@ -90,9 +93,11 @@ const S = {
   btnDanger:  'text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg p-1.5 transition-colors',
 };
 
+// ─── ATOMS ────────────────────────────────────────────────────────────────────
 function Field({ label, children }) {
   return <div><label className={S.label}>{label}</label>{children}</div>;
 }
+
 function Toggle({ value, onChange, label }) {
   return (
     <button onClick={() => onChange(!value)} className={`flex items-center gap-2 transition-colors ${value ? 'text-[#c9a96e]' : 'text-gray-400'}`}>
@@ -101,34 +106,123 @@ function Toggle({ value, onChange, label }) {
     </button>
   );
 }
-function Toast({ message }) {
+
+function Toast({ message, type = 'ok' }) {
+  const isErr = type === 'error';
   return (
-    <div className="fixed bottom-6 right-6 z-[999] flex items-center gap-3 px-5 py-3 rounded-full shadow-lg text-sm font-medium bg-[#4a3a31] text-white">
-      <Check size={15} />{message}
+    <div className={`fixed bottom-6 right-6 z-[999] flex items-center gap-3 px-5 py-3 rounded-full shadow-lg text-sm font-medium
+      ${isErr ? 'bg-red-500 text-white' : 'bg-[#4a3a31] text-white'}`}>
+      {isErr ? <AlertCircle size={15} /> : <Check size={15} />}
+      {message}
     </div>
   );
 }
-function MediaField({ label, value, typeValue, onTypeChange, onSrcChange, hideColor }) {
+
+// ─── INPUT NUMÉRICO SIN BUG ───────────────────────────────────────────────────
+// Mantiene el valor como string mientras se edita, convierte a número al perder foco
+function NumericInput({ value, onChange, placeholder = '0', step = '0.01', min = '0', className }) {
+  const [raw, setRaw] = useState(String(value ?? ''));
+  const [focused, setFocused] = useState(false);
+
+  // Sincronizar si el padre cambia el valor externamente
+  React.useEffect(() => {
+    if (!focused) setRaw(String(value ?? ''));
+  }, [value, focused]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      placeholder={placeholder}
+      value={focused ? raw : (value === 0 || value === '' || value == null ? '' : String(value))}
+      className={className || S.input}
+      onFocus={() => { setFocused(true); setRaw(value === 0 ? '' : String(value ?? '')); }}
+      onChange={e => setRaw(e.target.value)}
+      onBlur={() => {
+        setFocused(false);
+        const n = parseFloat(raw.replace(',', '.'));
+        onChange(isNaN(n) ? 0 : Math.max(0, n));
+      }}
+    />
+  );
+}
+
+// ─── MEDIA FIELD CON UPLOAD CLOUDINARY ───────────────────────────────────────
+function MediaField({ label, value, typeValue, onTypeChange, onSrcChange, hideColor, allowVideo = false }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState('');
+  const fileRef = useRef(null);
+
   const types = hideColor ? ['image', 'video'] : ['image', 'video', 'color'];
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    setUploadErr(''); setUploading(true);
+    try {
+      const url = await uploadToCloudinary(file);
+      onSrcChange(url);
+    } catch (err) {
+      setUploadErr('Error al subir. Verificá Cloudinary.');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const accept = typeValue === 'video' ? 'video/mp4,video/webm,video/mov' : 'image/jpeg,image/png,image/webp,image/gif';
+
   return (
     <div className="space-y-3">
       <label className={S.label}>{label}</label>
+
+      {/* Selector de tipo */}
       <div className="flex gap-2 flex-wrap">
         {types.map(t => (
-          <button key={t} onClick={() => onTypeChange(t)} className={`${S.btn} text-xs ${typeValue === t ? S.btnPrimary : S.btnGhost}`}>
+          <button key={t} onClick={() => onTypeChange(t)}
+            className={`${S.btn} text-xs ${typeValue === t ? S.btnPrimary : S.btnGhost}`}>
             {t === 'image' ? <Image size={13} /> : t === 'video' ? <Video size={13} /> : <Palette size={13} />}
             {t === 'image' ? 'Imagen' : t === 'video' ? 'Video' : 'Color sólido'}
           </button>
         ))}
       </div>
+
       {typeValue !== 'color' && (
-        <input className={S.input} placeholder={typeValue === 'video' ? 'URL video .mp4' : 'URL imagen'}
-          value={value} onChange={e => onSrcChange(e.target.value)} />
+        <>
+          {/* URL manual */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Link size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input className={`${S.input} pl-8`}
+                placeholder={typeValue === 'video' ? 'Pegar URL del video (.mp4)' : 'Pegar URL de imagen'}
+                value={value} onChange={e => onSrcChange(e.target.value)} />
+            </div>
+            {/* Upload a Cloudinary */}
+            <label className={`${S.btn} ${S.btnGhost} text-xs cursor-pointer flex-shrink-0 ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+              {uploading
+                ? <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                : <Upload size={13} />}
+              {uploading ? 'Subiendo...' : 'Subir archivo'}
+              <input ref={fileRef} type="file" accept={accept} onChange={handleFile} className="hidden" />
+            </label>
+          </div>
+          {uploadErr && <p className="text-xs text-red-400">{uploadErr}</p>}
+        </>
       )}
-      {typeValue === 'color' && <p className="text-xs text-gray-400 italic">Usará el fondo beige de la sección</p>}
+
+      {typeValue === 'color' && (
+        <p className="text-xs text-gray-400 italic">Usará el fondo beige de la sección</p>
+      )}
+
+      {/* Preview */}
       {value && typeValue === 'image' && (
         <div className="w-full h-28 rounded-lg overflow-hidden bg-gray-100">
           <img src={value} alt="" className="w-full h-full object-cover" onError={e => e.target.style.display='none'} />
+        </div>
+      )}
+      {value && typeValue === 'video' && (
+        <div className="w-full h-28 rounded-lg overflow-hidden bg-black flex items-center justify-center">
+          <video src={value} muted playsInline className="h-full object-contain" />
+          <span className="absolute text-white/60 text-xs">Vista previa de video</span>
         </div>
       )}
     </div>
@@ -144,11 +238,11 @@ function SettingsDrawer({ isOpen, onClose, config, onChange }) {
   const uGen  = (k, v) => onChange({ ...config, general: { ...g, [k]: v } });
 
   const TABS = [
-    { id: 'hero', label: 'Hero', icon: FileImage },
-    { id: 'cta', label: 'CTA Final', icon: Layout },
+    { id: 'hero',      label: 'Hero',      icon: FileImage },
+    { id: 'cta',       label: 'CTA Final', icon: Layout },
     { id: 'editorial', label: 'Editorial', icon: Layers },
-    { id: 'reels', label: 'Reels', icon: Film },
-    { id: 'general', label: 'General', icon: Settings },
+    { id: 'reels',     label: 'Reels',     icon: Film },
+    { id: 'general',   label: 'General',   icon: Settings },
   ];
 
   if (!isOpen) return null;
@@ -175,22 +269,37 @@ function SettingsDrawer({ isOpen, onClose, config, onChange }) {
             );
           })}
         </div>
+
         <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#faf8f5]">
 
+          {/* ── HERO ── */}
           {tab === 'hero' && <>
-            <MediaField label="Fondo del Hero (imagen o video)" value={h.src} typeValue={h.type}
-              onTypeChange={v => uHero('type', v)} onSrcChange={v => uHero('src', v)} hideColor />
+            <MediaField
+              label="Fondo del Hero — imagen o video (URL o subir archivo)"
+              value={h.src} typeValue={h.type}
+              onTypeChange={v => uHero('type', v)}
+              onSrcChange={v => uHero('src', v)}
+              hideColor
+            />
             <Field label={`Opacidad overlay — ${h.overlayOpacity}%`}>
               <input type="range" min={0} max={85} value={h.overlayOpacity}
                 onChange={e => uHero('overlayOpacity', Number(e.target.value))} className="w-full accent-[#c9a96e]" />
             </Field>
-            <Field label="Tagline pequeño"><input className={S.input} value={h.tagline} onChange={e => uHero('tagline', e.target.value)} /></Field>
-            <Field label="Título grande"><input className={S.input} value={h.title} onChange={e => uHero('title', e.target.value)} /></Field>
-            <Field label="Subtítulo"><input className={S.input} value={h.subtitle} onChange={e => uHero('subtitle', e.target.value)} /></Field>
+            <Field label="Tagline pequeño (ej: K-Beauty · Premium)">
+              <input className={S.input} value={h.tagline} onChange={e => uHero('tagline', e.target.value)} />
+            </Field>
+            <Field label="Título grande (ej: U.RRIOLA)">
+              <input className={S.input} value={h.title} onChange={e => uHero('title', e.target.value)} />
+            </Field>
+            <Field label="Subtítulo">
+              <input className={S.input} value={h.subtitle} onChange={e => uHero('subtitle', e.target.value)} />
+            </Field>
           </>}
 
+          {/* ── CTA ── */}
           {tab === 'cta' && <>
-            <MediaField label='Fondo sección "Tu rutina, elevada."' value={c.src} typeValue={c.type}
+            <MediaField label='Fondo sección "Tu rutina, elevada."'
+              value={c.src} typeValue={c.type}
               onTypeChange={v => uCta('type', v)} onSrcChange={v => uCta('src', v)} />
             {c.type !== 'color' && (
               <Field label={`Opacidad overlay — ${c.overlayOpacity}%`}>
@@ -206,6 +315,7 @@ function SettingsDrawer({ isOpen, onClose, config, onChange }) {
             </div>
           </>}
 
+          {/* ── EDITORIAL ── */}
           {tab === 'editorial' && (() => {
             const eds = config.editorial;
             const upd = nw => onChange({ ...config, editorial: nw });
@@ -243,6 +353,7 @@ function SettingsDrawer({ isOpen, onClose, config, onChange }) {
             );
           })()}
 
+          {/* ── REELS ── */}
           {tab === 'reels' && (() => {
             const reels = config.reels;
             const upd = nw => onChange({ ...config, reels: nw });
@@ -260,8 +371,8 @@ function SettingsDrawer({ isOpen, onClose, config, onChange }) {
                     <div className="flex items-center gap-3">
                       {r.thumb && <div className="w-10 h-16 rounded bg-gray-900 overflow-hidden flex-shrink-0"><img src={r.thumb} className="w-full h-full object-cover" alt=""/></div>}
                       <div className="flex-1 space-y-2">
-                        <Field label="Miniatura"><input className={S.input} placeholder="https://... .jpg" value={r.thumb} onChange={e => edit(i,'thumb',e.target.value)}/></Field>
-                        <Field label="Video"><input className={S.input} placeholder="https://... .mp4" value={r.src} onChange={e => edit(i,'src',e.target.value)}/></Field>
+                        <Field label="Miniatura (.jpg)"><input className={S.input} placeholder="https://... .jpg" value={r.thumb} onChange={e => edit(i,'thumb',e.target.value)}/></Field>
+                        <Field label="Video (.mp4)"><input className={S.input} placeholder="https://... .mp4" value={r.src} onChange={e => edit(i,'src',e.target.value)}/></Field>
                       </div>
                       <div className="flex flex-col gap-2 items-end">
                         <Toggle value={r.visible} onChange={v => edit(i,'visible',v)} label="Visible"/>
@@ -275,6 +386,7 @@ function SettingsDrawer({ isOpen, onClose, config, onChange }) {
             );
           })()}
 
+          {/* ── GENERAL ── */}
           {tab === 'general' && (
             <div className="space-y-5">
               <Field label="WhatsApp (código de país sin +)">
@@ -283,13 +395,13 @@ function SettingsDrawer({ isOpen, onClose, config, onChange }) {
               <Field label="Instagram URL"><input className={S.input} value={g.instagramUrl} onChange={e => uGen('instagramUrl', e.target.value)}/></Field>
               <Field label="Facebook URL"><input className={S.input} value={g.facebookUrl}   onChange={e => uGen('facebookUrl',  e.target.value)}/></Field>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Color dorado (acento)">
+                <Field label="Color dorado">
                   <div className="flex gap-2 items-center">
                     <input type="color" value={g.brandColor} onChange={e => uGen('brandColor', e.target.value)} className="w-10 h-10 rounded cursor-pointer border border-[#e8ddd0] p-0.5"/>
                     <input className={`${S.input} flex-1`} value={g.brandColor} onChange={e => uGen('brandColor', e.target.value)}/>
                   </div>
                 </Field>
-                <Field label="Color marrón (oscuro)">
+                <Field label="Color marrón">
                   <div className="flex gap-2 items-center">
                     <input type="color" value={g.darkColor} onChange={e => uGen('darkColor', e.target.value)} className="w-10 h-10 rounded cursor-pointer border border-[#e8ddd0] p-0.5"/>
                     <input className={`${S.input} flex-1`} value={g.darkColor} onChange={e => uGen('darkColor', e.target.value)}/>
@@ -303,13 +415,12 @@ function SettingsDrawer({ isOpen, onClose, config, onChange }) {
                   {g.aboutImage && <div className="mt-2 w-20 h-20 rounded-xl overflow-hidden"><img src={g.aboutImage} className="w-full h-full object-cover" alt=""/></div>}
                 </Field>
                 <Field label="Título"><input className={S.input} value={g.aboutTitle} onChange={e => uGen('aboutTitle', e.target.value)}/></Field>
-                <Field label="Texto descriptivo">
+                <Field label="Texto">
                   <textarea className={`${S.input} resize-none`} rows={3} value={g.aboutText} onChange={e => uGen('aboutText', e.target.value)}/>
                 </Field>
               </div>
             </div>
           )}
-
         </div>
       </div>
     </div>
@@ -319,7 +430,7 @@ function SettingsDrawer({ isOpen, onClose, config, onChange }) {
 // ─── CATEGORÍAS ───────────────────────────────────────────────────────────────
 function CategoriesSection({ config, onChange }) {
   const cats = config.categories;
-  const upd = nw => onChange({ ...config, categories: nw });
+  const upd  = nw => onChange({ ...config, categories: nw });
   const move   = (i, d) => { const arr=[...cats],j=i+d; if(j<0||j>=arr.length)return; [arr[i],arr[j]]=[arr[j],arr[i]]; upd(arr); };
   const edit   = (i, k, v) => upd(cats.map((c, idx) => idx===i ? { ...c, [k]: v } : c));
   const remove = i => upd(cats.filter((_, idx) => idx !== i));
@@ -341,16 +452,16 @@ function CategoriesSection({ config, onChange }) {
             </div>
             <div className="w-12 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
               {cat.img
-                ? <img src={cat.img} className="w-full h-full object-cover" alt="" onError={e => e.target.style.display='none'}/>
+                ? <img src={cat.img} className="w-full h-full object-cover" alt="" onError={e=>e.target.style.display='none'}/>
                 : <div className="w-full h-full flex items-center justify-center"><Image size={16} className="text-gray-300"/></div>}
             </div>
             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label="Nombre"><input className={S.input} value={cat.label} onChange={e => edit(i,'label',e.target.value)}/></Field>
-              <Field label="URL imagen"><input className={S.input} placeholder="https://..." value={cat.img} onChange={e => edit(i,'img',e.target.value)}/></Field>
+              <Field label="Nombre"><input className={S.input} value={cat.label} onChange={e=>edit(i,'label',e.target.value)}/></Field>
+              <Field label="URL imagen"><input className={S.input} placeholder="https://..." value={cat.img} onChange={e=>edit(i,'img',e.target.value)}/></Field>
             </div>
             <div className="flex flex-col gap-3 items-end">
-              <Toggle value={cat.visible} onChange={v => edit(i,'visible',v)} label="Visible"/>
-              <button onClick={() => remove(i)} className={S.btnDanger}><Trash2 size={15}/></button>
+              <Toggle value={cat.visible} onChange={v=>edit(i,'visible',v)} label="Visible"/>
+              <button onClick={()=>remove(i)} className={S.btnDanger}><Trash2 size={15}/></button>
             </div>
           </div>
         </div>
@@ -359,22 +470,21 @@ function CategoriesSection({ config, onChange }) {
   );
 }
 
-// ─── PRODUCTOS ────────────────────────────────────────────────────────────────
+// ─── PRODUCTOS — escribe a Firebase ───────────────────────────────────────────
 const PROD_PER_PAGE = 12;
 
-function ProductsSection({ config, onChange, initialFilter = 'all' }) {
+function ProductsSection({ products, setProducts, onToast, initialFilter = 'all' }) {
   const [search,    setSearch]    = useState('');
   const [filter,    setFilter]    = useState(initialFilter);
   const [page,      setPage]      = useState(1);
   const [editingId, setEditingId] = useState(null);
   const [editBuf,   setEditBuf]   = useState(null);
-  const [selected,  setSelected]  = useState(new Set()); // IDs seleccionados
+  const [saving,    setSaving]    = useState(false);
+  const [selected,  setSelected]  = useState(new Set());
 
-  const prods = config.products || [];
-
-  const filtered = useMemo(() => prods.filter(p => {
-    const q = search.toLowerCase();
-    const m = p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q);
+  const filtered = useMemo(() => products.filter(p => {
+    const q = (search || '').toLowerCase();
+    const m = (p.name||'').toLowerCase().includes(q) || (p.brand||'').toLowerCase().includes(q);
     if (!m) return false;
     if (filter === 'offer')    return p.inOffer;
     if (filter === 'hidden')   return !p.visible;
@@ -382,47 +492,100 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
     if (filter === 'nostock')  return p.stock === false;
     if (filter === 'lowstock') return p.lowStock === true;
     return true;
-  }), [prods, search, filter]);
+  }), [products, search, filter]);
 
   const totalPages = Math.ceil(filtered.length / PROD_PER_PAGE);
   const paginated  = filtered.slice((page-1)*PROD_PER_PAGE, page*PROD_PER_PAGE);
-
   const resetPage  = v => { setFilter(v); setPage(1); };
-  const startEdit  = p  => { setEditingId(p.id); setEditBuf({...p}); };
+  const startEdit  = p => { setEditingId(p.id); setEditBuf({...p}); };
   const cancelEdit = () => { setEditingId(null); setEditBuf(null); };
-  const saveEdit   = () => {
-    onChange({ ...config, products: prods.map(p => p.id === editingId ? editBuf : p) });
-    setEditingId(null); setEditBuf(null);
+
+  // ── GUARDAR UN PRODUCTO — escribe a Firebase ──────────────────────────────
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const fbId = editBuf.firebaseId;
+      if (fbId) {
+        // Actualizar en Firebase
+        const { firebaseId, id, ...fields } = editBuf;
+        await patchProduct(fbId, fields);
+        setProducts(prev => prev.map(p => p.id === editingId ? { ...editBuf } : p));
+      } else {
+        // Crear nuevo en Firebase
+        const { id, ...fields } = editBuf;
+        const newFbId = await createProduct(fields);
+        setProducts(prev => prev.map(p => p.id === editingId ? { ...editBuf, firebaseId: newFbId } : p));
+      }
+      onToast('✅ Producto guardado en Firebase');
+    } catch (err) {
+      console.error(err);
+      onToast('❌ Error al guardar. Revisá la consola.', 'error');
+    } finally {
+      setSaving(false);
+      setEditingId(null); setEditBuf(null);
+    }
   };
-  const quickToggle   = (id, key) => onChange({ ...config, products: prods.map(p => p.id===id ? {...p,[key]:!p[key]} : p) });
-  const removeProduct  = id => onChange({ ...config, products: prods.filter(p => p.id !== id) });
-  const removeSelected = () => {
-    if (!window.confirm(`¿Eliminar ${selected.size} productos seleccionados?`)) return;
-    onChange({ ...config, products: prods.filter(p => !selected.has(p.id)) });
+
+  // ── QUICK TOGGLE — escribe a Firebase ────────────────────────────────────
+  const quickToggle = async (p, key) => {
+    const newVal = !p[key];
+    // Optimistic update local
+    setProducts(prev => prev.map(x => x.id === p.id ? { ...x, [key]: newVal } : x));
+    if (p.firebaseId) {
+      try { await patchProduct(p.firebaseId, { [key]: newVal }); }
+      catch (err) {
+        console.error(err);
+        // Revertir si falla
+        setProducts(prev => prev.map(x => x.id === p.id ? { ...x, [key]: !newVal } : x));
+        onToast('❌ Error al actualizar', 'error');
+      }
+    }
+  };
+
+  // ── ELIMINAR — escribe a Firebase ─────────────────────────────────────────
+  const removeProduct = async (p) => {
+    if (!window.confirm(`¿Eliminar "${p.name}"?`)) return;
+    setProducts(prev => prev.filter(x => x.id !== p.id));
+    if (p.firebaseId) {
+      try { await deleteProductFromFirebase(p.firebaseId); }
+      catch (err) { console.error(err); onToast('❌ Error al eliminar', 'error'); }
+    }
+  };
+
+  const removeSelected = async () => {
+    if (!window.confirm(`¿Eliminar ${selected.size} productos?`)) return;
+    const toRemove = products.filter(p => selected.has(p.id));
+    setProducts(prev => prev.filter(p => !selected.has(p.id)));
     setSelected(new Set());
+    for (const p of toRemove) {
+      if (p.firebaseId) {
+        try { await deleteProductFromFirebase(p.firebaseId); }
+        catch (e) { console.error(e); }
+      }
+    }
   };
-  const toggleSelect = (id) => setSelected(prev => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-  const selectAll  = () => setSelected(new Set(paginated.map(p => p.id)));
-  const selectNone = () => setSelected(new Set());
-  const addProduct   = () => {
-    const np = { id: Date.now(), brand:'NUEVA MARCA', name:'Nuevo producto', price:0, image:'', images:[],
+
+  const addProduct = () => {
+    const np = {
+      id: Date.now(), brand:'NUEVA MARCA', name:'Nuevo producto', price:0, image:'', images:[],
       stock:true, inOffer:false, offerPrice:null, hasTon:false, tonValue:'', visible:true,
-      description:'', rating:4.5, reviews:0, category:'facial' };
-    onChange({ ...config, products: [np, ...prods] });
+      description:'', rating:4.5, reviews:0, category:'facial',
+    };
+    setProducts(prev => [np, ...prev]);
     startEdit(np); setPage(1);
   };
 
+  const toggleSelect = id => setSelected(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
+  const selectAll    = () => setSelected(new Set(paginated.map(p=>p.id)));
+  const selectNone   = () => setSelected(new Set());
+
   const FILTERS = [
-    ['all','Todos',prods.length],
-    ['offer','En oferta',prods.filter(p=>p.inOffer).length],
-    ['nostock','Sin stock',prods.filter(p=>p.stock===false).length],
-    ['lowstock','Poco stock',prods.filter(p=>p.lowStock===true).length],
-    ['hidden','Ocultos',prods.filter(p=>!p.visible).length],
-    ['ton','Con ton',prods.filter(p=>p.hasTon).length],
+    ['all','Todos',products.length],
+    ['offer','En oferta',products.filter(p=>p.inOffer).length],
+    ['nostock','Sin stock',products.filter(p=>p.stock===false).length],
+    ['lowstock','Poco stock',products.filter(p=>p.lowStock===true).length],
+    ['hidden','Ocultos',products.filter(p=>!p.visible).length],
+    ['ton','Con ton',products.filter(p=>p.hasTon).length],
   ];
 
   return (
@@ -433,7 +596,7 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
           <input className={`${S.input} pl-8 w-56`} placeholder="Buscar producto o marca..."
             value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}/>
         </div>
-        <button onClick={addProduct} className={`${S.btn} ${S.btnPrimary} text-xs`}><Plus size={13}/> Nuevo producto</button>
+        <button onClick={addProduct} className={`${S.btn} ${S.btnPrimary} text-xs`}><Plus size={13}/> Nuevo</button>
       </div>
 
       <div className="flex gap-2 flex-wrap">
@@ -441,17 +604,16 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
           <button key={v} onClick={() => resetPage(v)}
             className={`${S.btn} text-xs ${filter===v ? S.btnPrimary : S.btnGhost}`}>
             {l}
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${filter===v ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>{count}</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${filter===v?'bg-white/20':'bg-gray-100 text-gray-500'}`}>{count}</span>
           </button>
         ))}
       </div>
 
       <p className="text-xs text-gray-400">{filtered.length} resultado{filtered.length!==1?'s':''} · pág {page}/{totalPages||1}</p>
 
-      {/* Barra de selección múltiple */}
       {selected.size > 0 && (
         <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-          <span className="text-sm font-medium text-red-600">{selected.size} producto{selected.size!==1?'s':''} seleccionado{selected.size!==1?'s':''}</span>
+          <span className="text-sm font-medium text-red-600">{selected.size} seleccionado{selected.size!==1?'s':''}</span>
           <div className="flex gap-2">
             <button onClick={selectNone} className={`${S.btn} ${S.btnGhost} text-xs`}><X size={12}/> Deseleccionar</button>
             <button onClick={removeSelected} className={`${S.btn} text-xs bg-red-500 text-white hover:bg-red-600`}><Trash2 size={12}/> Eliminar {selected.size}</button>
@@ -459,10 +621,9 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
         </div>
       )}
 
-      {/* Seleccionar todos de la página */}
       {paginated.length > 0 && selected.size === 0 && (
         <button onClick={selectAll} className="text-xs text-[#c9a96e] hover:underline text-left">
-          Seleccionar todos en esta página ({paginated.length})
+          Seleccionar todos ({paginated.length})
         </button>
       )}
 
@@ -470,65 +631,95 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
         {paginated.map(p => (
           <div key={p.id} className={`${S.card} ${!p.visible ? 'opacity-50' : ''}`}>
             {editingId === p.id && editBuf ? (
+              /* ── FORM EDICIÓN ── */
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-[#4a3a31] truncate mr-4">✏️ {editBuf.name}</p>
                   <div className="flex gap-2 flex-shrink-0">
-                    <button onClick={saveEdit}   className={`${S.btn} ${S.btnPrimary} text-xs`}><Save size={13}/> Guardar</button>
-                    <button onClick={cancelEdit} className={`${S.btn} ${S.btnGhost}   text-xs`}><X size={13}/> Cancelar</button>
+                    <button onClick={saveEdit} disabled={saving} className={`${S.btn} ${S.btnPrimary} text-xs ${saving?'opacity-60 pointer-events-none':''}`}>
+                      {saving ? <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> : <Save size={13}/>}
+                      {saving ? 'Guardando...' : 'Guardar en Firebase'}
+                    </button>
+                    <button onClick={cancelEdit} className={`${S.btn} ${S.btnGhost} text-xs`}><X size={13}/> Cancelar</button>
                   </div>
                 </div>
+
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <Field label="Marca"><input className={S.input} value={editBuf.brand} onChange={e => setEditBuf(b=>({...b,brand:e.target.value}))}/></Field>
-                  <Field label="Nombre"><input className={S.input} value={editBuf.name}  onChange={e => setEditBuf(b=>({...b,name:e.target.value}))}/></Field>
-                  <Field label="Precio USD"><input className={S.input} type="number" min={0} step={0.01} value={editBuf.price} onChange={e => setEditBuf(b=>({...b,price:Number(e.target.value)}))}/></Field>
+                  <Field label="Marca">
+                    <input className={S.input} value={editBuf.brand} onChange={e=>setEditBuf(b=>({...b,brand:e.target.value}))}/>
+                  </Field>
+                  <Field label="Nombre">
+                    <input className={S.input} value={editBuf.name} onChange={e=>setEditBuf(b=>({...b,name:e.target.value}))}/>
+                  </Field>
+                  <Field label="Precio USD">
+                    <NumericInput value={editBuf.price} onChange={v=>setEditBuf(b=>({...b,price:v}))} placeholder="0.00"/>
+                  </Field>
                 </div>
+
                 <Field label="Descripción">
-                  <textarea className={`${S.input} resize-none`} rows={2} value={editBuf.description}
-                    placeholder="Descripción breve..." onChange={e => setEditBuf(b=>({...b,description:e.target.value}))}/>
+                  <textarea className={`${S.input} resize-none`} rows={2} value={editBuf.description||''}
+                    placeholder="Descripción breve..." onChange={e=>setEditBuf(b=>({...b,description:e.target.value}))}/>
                 </Field>
-                <Field label="Imagen principal (URL)">
-                  <input className={S.input} placeholder="https://..." value={editBuf.image} onChange={e => setEditBuf(b=>({...b,image:e.target.value}))}/>
+
+                <Field label="Imagen principal">
+                  <div className="flex gap-2">
+                    <input className={`${S.input} flex-1`} placeholder="https://..." value={editBuf.image||''}
+                      onChange={e=>setEditBuf(b=>({...b,image:e.target.value}))}/>
+                    <label className={`${S.btn} ${S.btnGhost} text-xs cursor-pointer flex-shrink-0`}>
+                      <Upload size={13}/> Subir
+                      <input type="file" accept="image/*" className="hidden" onChange={async e=>{
+                        const f=e.target.files[0]; if(!f) return;
+                        try { const url=await uploadToCloudinary(f); setEditBuf(b=>({...b,image:url})); }
+                        catch { onToast('❌ Error al subir imagen','error'); }
+                        e.target.value='';
+                      }}/>
+                    </label>
+                  </div>
+                  {editBuf.image && <div className="mt-2 w-20 h-28 rounded-lg overflow-hidden bg-gray-100"><img src={editBuf.image} className="w-full h-full object-cover" alt=""/></div>}
                 </Field>
-                {editBuf.image && <div className="w-20 h-28 rounded-lg overflow-hidden bg-gray-100"><img src={editBuf.image} className="w-full h-full object-cover" alt=""/></div>}
-                <Field label="Imágenes adicionales (separadas por coma)">
+
+                <Field label="Imágenes adicionales (URLs separadas por coma)">
                   <input className={S.input} placeholder="url1, url2, url3"
                     value={(editBuf.images||[]).join(', ')}
-                    onChange={e => setEditBuf(b=>({...b,images:e.target.value.split(',').map(s=>s.trim()).filter(Boolean)}))}/>
+                    onChange={e=>setEditBuf(b=>({...b,images:e.target.value.split(',').map(s=>s.trim()).filter(Boolean)}))}/>
                 </Field>
+
                 <Field label="Categoría">
-                  <select className={S.input} value={editBuf.category} onChange={e => setEditBuf(b=>({...b,category:e.target.value}))}>
-                    {config.categories.map(c => <option key={c.id} value={c.label.toLowerCase()}>{c.label}</option>)}
+                  <select className={S.input} value={editBuf.category||'facial'}
+                    onChange={e=>setEditBuf(b=>({...b,category:e.target.value}))}>
+                    <option value="facial">Facial</option>
+                    <option value="capilar">Capilar</option>
+                    <option value="corporal">Corporal</option>
+                    <option value="herramientas">Herramientas</option>
+                    <option value="esenciales">Esenciales</option>
                   </select>
                 </Field>
+
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-gray-50 rounded-xl p-4">
-                  <Toggle value={editBuf.visible} onChange={v => setEditBuf(b=>({...b,visible:v}))}  label="Visible"/>
-                  <Toggle value={editBuf.stock}    onChange={v => setEditBuf(b=>({...b,stock:v}))}     label="En stock"/>
-                  <Toggle value={editBuf.inOffer}  onChange={v => setEditBuf(b=>({...b,inOffer:v}))}   label="En oferta"/>
-                  <Toggle value={editBuf.hasTon}   onChange={v => setEditBuf(b=>({...b,hasTon:v}))}    label="Tiene ton"/>
-                  <Toggle value={!!editBuf.lowStock} onChange={v => setEditBuf(b=>({...b,lowStock:v}))} label="Poco stock"/>
+                  <Toggle value={editBuf.visible}  onChange={v=>setEditBuf(b=>({...b,visible:v}))}  label="Visible"/>
+                  <Toggle value={editBuf.stock}     onChange={v=>setEditBuf(b=>({...b,stock:v}))}    label="En stock"/>
+                  <Toggle value={editBuf.inOffer}   onChange={v=>setEditBuf(b=>({...b,inOffer:v}))}  label="En oferta"/>
+                  <Toggle value={editBuf.hasTon}    onChange={v=>setEditBuf(b=>({...b,hasTon:v}))}   label="Tiene ton"/>
+                  <Toggle value={!!editBuf.lowStock} onChange={v=>setEditBuf(b=>({...b,lowStock:v}))} label="Poco stock"/>
                 </div>
+
                 {editBuf.inOffer && (
                   <Field label="Precio de oferta USD">
-                    <input className={S.input} type="number" min={0} step={0.01} value={editBuf.offerPrice||''} onChange={e => setEditBuf(b=>({...b,offerPrice:Number(e.target.value)}))}/>
+                    <NumericInput value={editBuf.offerPrice||0} onChange={v=>setEditBuf(b=>({...b,offerPrice:v}))} placeholder="0.00"/>
                   </Field>
                 )}
                 {editBuf.hasTon && (
                   <Field label="Ton / variante (ej: 21N, 23C)">
-                    <input className={S.input} value={editBuf.tonValue||''} onChange={e => setEditBuf(b=>({...b,tonValue:e.target.value}))}/>
+                    <input className={S.input} value={editBuf.tonValue||''}
+                      onChange={e=>setEditBuf(b=>({...b,tonValue:e.target.value}))}/>
                   </Field>
                 )}
               </div>
             ) : (
+              /* ── FILA COMPACTA ── */
               <div className="flex items-center gap-3">
-                {/* Checkbox selección */}
-                <input
-                  type="checkbox"
-                  checked={selected.has(p.id)}
-                  onChange={() => toggleSelect(p.id)}
-                  onClick={e => e.stopPropagation()}
-                  className="w-4 h-4 rounded accent-gray-900 flex-shrink-0 cursor-pointer"
-                />
+                <input type="checkbox" checked={selected.has(p.id)} onChange={()=>toggleSelect(p.id)}
+                  onClick={e=>e.stopPropagation()} className="w-4 h-4 rounded accent-gray-900 flex-shrink-0 cursor-pointer"/>
                 <div className="w-10 h-14 rounded-md overflow-hidden bg-gray-100 flex-shrink-0">
                   {p.image
                     ? <img src={p.image} className="w-full h-full object-cover" alt=""/>
@@ -538,31 +729,35 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
                   <p className="text-[9px] font-bold tracking-widest uppercase text-[#c9a96e]">{p.brand}</p>
                   <p className="text-[13px] font-medium text-[#1a1209] truncate">{p.name}</p>
                   <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                    <p className="text-xs text-gray-400">${Number(p.price).toFixed(2)}</p>
+                    {/* Precio con tachado si hay oferta */}
+                    {p.inOffer && p.offerPrice
+                      ? <span className="text-xs"><span className="font-semibold text-[#c9a96e]">${Number(p.offerPrice).toFixed(2)}</span> <span className="text-gray-400 line-through">${Number(p.price).toFixed(2)}</span></span>
+                      : <span className="text-xs text-gray-400">${Number(p.price||0).toFixed(2)}</span>}
                     {p.inOffer   && <span className="text-[9px] font-bold uppercase text-[#c9a96e] bg-[#c9a96e]/10 px-1.5 py-0.5 rounded-full">Oferta</span>}
                     {!p.stock    && <span className="text-[9px] font-bold uppercase text-red-400 bg-red-50 px-1.5 py-0.5 rounded-full">Sin stock</span>}
                     {p.lowStock  && <span className="text-[9px] font-bold uppercase text-orange-400 bg-orange-50 px-1.5 py-0.5 rounded-full">Poco stock</span>}
                     {p.hasTon    && <span className="text-[9px] font-bold uppercase text-purple-400 bg-purple-50 px-1.5 py-0.5 rounded-full">Ton</span>}
                     {!p.visible  && <span className="text-[9px] font-bold uppercase text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">Oculto</span>}
+                    {!p.firebaseId && <span className="text-[9px] font-bold uppercase text-amber-400 bg-amber-50 px-1.5 py-0.5 rounded-full">Solo local</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-0.5 flex-shrink-0">
-                  <button onClick={() => quickToggle(p.id,'visible')} title={p.visible?'Ocultar':'Mostrar'}
+                  <button onClick={()=>quickToggle(p,'visible')} title={p.visible?'Ocultar':'Mostrar'}
                     className="p-2 rounded-lg text-gray-300 hover:text-[#4a3a31] hover:bg-gray-50 transition-colors">
-                    {p.visible ? <Eye size={14}/> : <EyeOff size={14}/>}
+                    {p.visible?<Eye size={14}/>:<EyeOff size={14}/>}
                   </button>
-                  <button onClick={() => quickToggle(p.id,'stock')} title="Toggle stock"
+                  <button onClick={()=>quickToggle(p,'stock')} title="Toggle stock"
                     className="p-2 rounded-lg hover:bg-gray-50 transition-colors">
-                    <Check size={14} className={p.stock ? 'text-green-400' : 'text-gray-300'}/>
+                    <Check size={14} className={p.stock?'text-green-400':'text-gray-300'}/>
                   </button>
-                  <button onClick={() => quickToggle(p.id,'inOffer')} title="Toggle oferta"
+                  <button onClick={()=>quickToggle(p,'inOffer')} title="Toggle oferta"
                     className="p-2 rounded-lg hover:bg-gray-50 transition-colors">
-                    <Tag size={14} className={p.inOffer ? 'text-[#c9a96e]' : 'text-gray-300'}/>
+                    <Tag size={14} className={p.inOffer?'text-[#c9a96e]':'text-gray-300'}/>
                   </button>
-                  <button onClick={() => startEdit(p)} className="p-2 rounded-lg text-gray-300 hover:text-[#4a3a31] hover:bg-gray-50 transition-colors">
+                  <button onClick={()=>startEdit(p)} className="p-2 rounded-lg text-gray-300 hover:text-[#4a3a31] hover:bg-gray-50 transition-colors">
                     <Edit2 size={14}/>
                   </button>
-                  <button onClick={() => removeProduct(p.id)} className={S.btnDanger}><Trash2 size={14}/></button>
+                  <button onClick={()=>removeProduct(p)} className={S.btnDanger}><Trash2 size={14}/></button>
                 </div>
               </div>
             )}
@@ -572,21 +767,21 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
 
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-2 pt-2">
-          <button onClick={() => setPage(p=>Math.max(1,p-1))} disabled={page===1}
+          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}
             className="w-8 h-8 rounded-full border border-[#e8ddd0] flex items-center justify-center hover:border-[#c9a96e] disabled:opacity-30 transition-colors">
             <ChevronLeft size={14}/>
           </button>
           {Array.from({length:totalPages},(_,i)=>i+1)
             .filter(p=>p===1||p===totalPages||Math.abs(p-page)<=1)
             .reduce((acc,p,idx,arr)=>{if(idx>0&&p-arr[idx-1]>1)acc.push('…');acc.push(p);return acc;},[])
-            .map((p,i)=> p==='…'
-              ? <span key={`e${i}`} className="text-gray-400 text-sm px-1">…</span>
-              : <button key={p} onClick={()=>setPage(p)}
-                  className={`w-8 h-8 rounded-full text-xs font-medium transition-all ${p===page?'bg-[#4a3a31] text-white':'border border-[#e8ddd0] text-gray-600 hover:border-[#4a3a31]'}`}>
-                  {p}
-                </button>
+            .map((p,i)=>p==='…'
+              ?<span key={`e${i}`} className="text-gray-400 text-sm px-1">…</span>
+              :<button key={p} onClick={()=>setPage(p)}
+                className={`w-8 h-8 rounded-full text-xs font-medium transition-all ${p===page?'bg-[#4a3a31] text-white':'border border-[#e8ddd0] text-gray-600 hover:border-[#4a3a31]'}`}>
+                {p}
+              </button>
             )}
-          <button onClick={() => setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages}
+          <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages}
             className="w-8 h-8 rounded-full border border-[#e8ddd0] flex items-center justify-center hover:border-[#c9a96e] disabled:opacity-30 transition-colors">
             <ChevronRight size={14}/>
           </button>
@@ -597,33 +792,31 @@ function ProductsSection({ config, onChange, initialFilter = 'all' }) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function Dashboard({ config, onNavigate, onImportMock, onCSVImport, importing, importDone }) {
-  const prods    = config.products || [];
-  const enOferta = prods.filter(p => p.inOffer).length;
-  const sinStock = prods.filter(p => p.stock === false).length;
-  const ocultos  = prods.filter(p => !p.visible).length;
-  const pocoStock = prods.filter(p => p.lowStock === true).length;
-  const cats     = config.categories.filter(c => c.visible).length;
+function Dashboard({ products, config, onNavigate, onImportMock, onCSVImport, importing, importDone }) {
+  const enOferta  = products.filter(p=>p.inOffer).length;
+  const sinStock  = products.filter(p=>p.stock===false).length;
+  const ocultos   = products.filter(p=>!p.visible).length;
+  const pocoStock = products.filter(p=>p.lowStock===true).length;
+  const cats      = config.categories.filter(c=>c.visible).length;
 
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-light text-[#1a1209]" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+        <h1 className="text-2xl font-light text-[#1a1209]" style={{ fontFamily:"'Cormorant Garamond',serif" }}>
           Panel de administración
         </h1>
         <p className="text-sm text-gray-400 mt-1">Gestión de tu tienda U.RRIOLA K-Beauty</p>
       </div>
 
-      {/* Stats — cada una lleva a productos con filtro */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
-          { label:'Total productos', value:prods.length,  bg:'bg-[#4a3a31]',    text:'text-white',        filter:'all' },
-          { label:'En oferta',       value:enOferta,      bg:'bg-[#c9a96e]/15', text:'text-[#c9a96e]',    filter:'offer' },
-          { label:'Sin stock',       value:sinStock,      bg:'bg-red-50',       text:'text-red-400',      filter:'nostock' },
-          { label:'Poco stock',      value:pocoStock,     bg:'bg-orange-50',    text:'text-orange-400',   filter:'lowstock' },
-          { label:'Ocultos',         value:ocultos,       bg:'bg-gray-100',     text:'text-gray-400',     filter:'hidden' },
-        ].map(s => (
-          <button key={s.label} onClick={() => onNavigate('products', s.filter)}
+          { label:'Total productos', value:products.length, bg:'bg-[#4a3a31]',    text:'text-white',      filter:'all' },
+          { label:'En oferta',       value:enOferta,        bg:'bg-[#c9a96e]/15', text:'text-[#c9a96e]',  filter:'offer' },
+          { label:'Sin stock',       value:sinStock,        bg:'bg-red-50',       text:'text-red-400',    filter:'nostock' },
+          { label:'Poco stock',      value:pocoStock,       bg:'bg-orange-50',    text:'text-orange-400', filter:'lowstock' },
+          { label:'Ocultos',         value:ocultos,         bg:'bg-gray-100',     text:'text-gray-400',   filter:'hidden' },
+        ].map(s=>(
+          <button key={s.label} onClick={()=>onNavigate('products',s.filter)}
             className={`${s.bg} rounded-xl p-5 text-left hover:scale-[1.02] transition-transform`}>
             <p className={`text-3xl font-bold ${s.text}`}>{s.value}</p>
             <p className={`text-xs mt-1 ${s.text} opacity-70`}>{s.label}</p>
@@ -631,42 +824,37 @@ function Dashboard({ config, onNavigate, onImportMock, onCSVImport, importing, i
         ))}
       </div>
 
-      {/* Acceso rápido */}
       <div>
-        <p className="text-[11px] font-bold tracking-widest uppercase text-[#8a6f4e] mb-4">Lo que más usás</p>
+        <p className="text-[11px] font-bold tracking-widest uppercase text-[#8a6f4e] mb-4">Acceso rápido</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[
-            { icon:Package, label:'Productos',   desc:'Editar precios, stock, ofertas y ton', tab:'products',   accent:'#4a3a31' },
-            { icon:Grid,    label:'Categorías',  desc:'Reordenar, crear y ocultar categorías', tab:'categories', accent:'#c9a96e' },
-          ].map(a => {
-            const Icon = a.icon;
-            return (
-              <button key={a.tab} onClick={() => onNavigate(a.tab)}
-                className="group flex items-center gap-4 bg-white border border-[#e8ddd0] rounded-xl p-5 hover:border-[#c9a96e] hover:shadow-md transition-all text-left">
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: a.accent+'18' }}>
-                  <Icon size={22} style={{ color: a.accent }}/>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-[#1a1209]">{a.label}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{a.desc}</p>
-                </div>
-                <ChevronRight size={16} className="ml-auto text-gray-300 group-hover:text-[#c9a96e] transition-colors"/>
-              </button>
-            );
-          })}
+            { icon:Package, label:'Productos',  desc:'Editar precios, stock, ofertas y ton — sincroniza a Firebase', tab:'products',   accent:'#4a3a31' },
+            { icon:Grid,    label:'Categorías', desc:'Reordenar, crear y ocultar categorías', tab:'categories', accent:'#c9a96e' },
+          ].map(a=>{ const Icon=a.icon; return (
+            <button key={a.tab} onClick={()=>onNavigate(a.tab)}
+              className="group flex items-center gap-4 bg-white border border-[#e8ddd0] rounded-xl p-5 hover:border-[#c9a96e] hover:shadow-md transition-all text-left">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor:a.accent+'18' }}>
+                <Icon size={22} style={{ color:a.accent }}/>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[#1a1209]">{a.label}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{a.desc}</p>
+              </div>
+              <ChevronRight size={16} className="ml-auto text-gray-300 group-hover:text-[#c9a96e] transition-colors"/>
+            </button>
+          );})}
         </div>
       </div>
 
-      {/* Categorías activas */}
       <div className={S.card}>
         <div className="flex items-center justify-between mb-4">
           <p className="text-sm font-semibold text-[#1a1209]">Categorías activas ({cats}/{config.categories.length})</p>
-          <button onClick={() => onNavigate('categories')} className="text-xs text-[#c9a96e] hover:underline">Editar →</button>
+          <button onClick={()=>onNavigate('categories')} className="text-xs text-[#c9a96e] hover:underline">Editar →</button>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {config.categories.map(c => (
+          {config.categories.map(c=>(
             <span key={c.id} className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full
-              ${c.visible ? 'bg-[#4a3a31]/10 text-[#4a3a31]' : 'bg-gray-100 text-gray-400 line-through'}`}>
+              ${c.visible?'bg-[#4a3a31]/10 text-[#4a3a31]':'bg-gray-100 text-gray-400 line-through'}`}>
               {c.label}
             </span>
           ))}
@@ -677,8 +865,6 @@ function Dashboard({ config, onNavigate, onImportMock, onCSVImport, importing, i
       <div>
         <p className="text-[11px] font-bold tracking-widest uppercase text-[#8a6f4e] mb-4">Importar productos</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-          {/* Botón único — productos mock */}
           <div className="bg-white border border-[#e8ddd0] rounded-xl p-5 shadow-sm space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-[#4a3a31]/10 flex items-center justify-center flex-shrink-0">
@@ -686,53 +872,43 @@ function Dashboard({ config, onNavigate, onImportMock, onCSVImport, importing, i
               </div>
               <div>
                 <p className="text-sm font-semibold text-[#1a1209]">Importar catálogo inicial</p>
-                <p className="text-xs text-gray-400">Carga los {MOCK_PRODUCTS.length} productos de muestra. <strong>Una sola vez.</strong></p>
+                <p className="text-xs text-gray-400">Sube los productos de muestra a Firebase. <strong>Una sola vez.</strong></p>
               </div>
             </div>
             {importDone
-              ? <p className="text-xs text-green-600 font-medium flex items-center gap-1"><Check size={13}/> Productos importados correctamente</p>
+              ? <p className="text-xs text-green-600 font-medium flex items-center gap-1"><Check size={13}/> Importado correctamente</p>
               : <button onClick={onImportMock} disabled={importing}
                   className={`${S.btn} ${S.btnPrimary} text-xs w-full justify-center`}>
                   {importing ? 'Importando...' : `Importar ${MOCK_PRODUCTS.length} productos`}
-                </button>
-            }
+                </button>}
           </div>
-
-          {/* CSV masivo */}
           <div className="bg-white border border-[#e8ddd0] rounded-xl p-5 shadow-sm space-y-3">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-[#c9a96e]/15 flex items-center justify-center flex-shrink-0">
                 <Grid size={18} className="text-[#c9a96e]"/>
               </div>
               <div>
-                <p className="text-sm font-semibold text-[#1a1209]">Importación masiva CSV</p>
+                <p className="text-sm font-semibold text-[#1a1209]">Importación CSV masiva</p>
                 <p className="text-xs text-gray-400">Columnas: <code className="bg-gray-100 px-1 rounded">brand, name, price, category, image, stock</code></p>
               </div>
             </div>
             <div className="flex gap-2">
               <a href="data:text/csv;charset=utf-8,brand,name,price,category,image,stock%0AABIB,Ejemplo,25.00,facial,,true"
-                download="plantilla_productos.csv"
-                className={`${S.btn} ${S.btnGhost} text-xs`}>
-                ↓ Plantilla
-              </a>
+                download="plantilla.csv" className={`${S.btn} ${S.btnGhost} text-xs`}>↓ Plantilla</a>
               <label className={`${S.btn} ${S.btnPrimary} text-xs cursor-pointer`}>
-                ↑ Subir CSV
-                <input type="file" accept=".csv" onChange={onCSVImport} className="hidden"/>
+                ↑ Subir CSV<input type="file" accept=".csv" onChange={onCSVImport} className="hidden"/>
               </label>
             </div>
           </div>
-
         </div>
       </div>
 
-      {/* Tip configuración avanzada */}
       <div className="flex items-start gap-4 bg-amber-50 border border-amber-100 rounded-xl p-5">
         <Settings size={20} className="text-amber-500 flex-shrink-0 mt-0.5"/>
         <div>
           <p className="text-sm font-semibold text-[#4a3a31]">Configuración avanzada — ⚙ arriba a la derecha</p>
           <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-            Hero (imagen/video de fondo), sección CTA "Tu rutina, elevada.", Editorial "Glow the Korean Way", Reels,
-            colores de marca, WhatsApp, redes sociales y sección Nosotros.
+            Hero (imagen/video + subida Cloudinary), CTA, Editorial, Reels, colores, WhatsApp y sección Nosotros.
           </p>
         </div>
       </div>
@@ -749,7 +925,13 @@ const MAIN_TABS = [
 
 export default function Admin() {
   const navigate = useNavigate();
-  const [config,       setConfig]       = useState(() => { const s=getAdminConfig(); return { ...DEFAULT_CONFIG, ...s, products: s.products ?? DEFAULT_CONFIG.products }; });
+
+  // Config de estética (localStorage) — NO incluye productos
+  const [config,       setConfig]       = useState(() => getAdminConfig());
+  // Productos vienen de Firebase (se cargan al montar)
+  const [products,     setProducts]     = useState([]);
+  const [loadingProds, setLoadingProds] = useState(true);
+
   const [activeTab,    setActiveTab]    = useState('dashboard');
   const [activeFilter, setActiveFilter] = useState('all');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -758,108 +940,100 @@ export default function Admin() {
   const [importDone,   setImportDone]   = useState(() => !!localStorage.getItem('urriola_import_done'));
   const [importing,    setImporting]    = useState(false);
 
+  // Cargar productos desde Firebase al iniciar
+  useEffect(() => {
+    import('./firebase').then(({ subscribeProducts }) => {
+      const unsub = subscribeProducts(
+        data => {
+          setProducts(data.map(p => ({
+            ...p,
+            id: p.id,              // Firebase doc id = local id
+            firebaseId: p.id,      // también guardamos firebaseId explícito
+          })));
+          setLoadingProds(false);
+        },
+        () => setLoadingProds(false)
+      );
+      return unsub;
+    });
+  }, []);
+
   const handleChange = useCallback(cfg => { setConfig(cfg); setDirty(true); }, []);
 
+  // Guardar solo config estética a localStorage (productos van directo a Firebase)
   const handleSave = () => {
-    saveConfig(config); setDirty(false);
-    setToast('¡Cambios guardados!'); setTimeout(() => setToast(null), 2500);
-  };
-  const handleReset = () => {
-    if (!window.confirm('¿Restaurar configuración por defecto? Perderás todos tus cambios.')) return;
-    localStorage.removeItem(LS_KEY); setConfig(DEFAULT_CONFIG); setDirty(false);
-    setToast('Configuración restaurada'); setTimeout(() => setToast(null), 2500);
+    const { products: _, ...cfgWithoutProds } = config;
+    saveConfig(cfgWithoutProds);
+    setDirty(false);
+    showToast('¡Configuración guardada!');
   };
 
-  // Navegar a tab con filtro opcional
+  const handleReset = () => {
+    if (!window.confirm('¿Restaurar configuración visual por defecto?')) return;
+    localStorage.removeItem(LS_KEY); setConfig(DEFAULT_CONFIG); setDirty(false);
+    showToast('Configuración restaurada');
+  };
+
+  const showToast = (msg, type='ok') => {
+    setToast({ msg, type }); setTimeout(() => setToast(null), 3000);
+  };
+
   const handleNavigate = (tab, filter) => {
     setActiveTab(tab);
     if (filter) setActiveFilter(filter);
   };
 
-  // Importar productos mock — sube a Firebase Y actualiza estado local
   const handleImportMock = async () => {
-    if (!window.confirm(`¿Importar ${MOCK_PRODUCTS.length} productos a Firebase? Esto los hará visibles en la tienda.`)) return;
+    if (!window.confirm(`¿Importar ${MOCK_PRODUCTS.length} productos a Firebase?`)) return;
     setImporting(true);
     try {
-      const { getFirestore, collection, addDoc, serverTimestamp } = await import('firebase/firestore');
-      const db = getFirestore();
-      let count = 0;
+      const { createProduct: cp } = await import('./firebase');
       for (const p of MOCK_PRODUCTS) {
-        await addDoc(collection(db, 'products'), {
-          brand:       p.brand,
-          name:        p.name,
-          price:       p.price,
-          image:       p.image,
-          images:      p.images || [p.image],
-          category:    p.category || 'facial',
-          stock:       true,
-          visible:     true,
-          featured:    false,
-          inOffer:     false,
-          offerPrice:  null,
-          hasTon:      false,
-          tonValue:    '',
-          lowStock:    false,
-          description: '',
-          rating:      p.rating || 4.5,
-          reviews:     p.reviews || 0,
-          createdAt:   serverTimestamp(),
+        await cp({
+          brand:p.brand, name:p.name, price:p.price, image:p.image,
+          images:p.images||[p.image], category:p.category||'facial',
+          stock:true, visible:true, inOffer:false, offerPrice:null,
+          hasTon:false, tonValue:'', lowStock:false, description:'',
+          rating:p.rating||4.5, reviews:p.reviews||0,
         });
-        count++;
       }
-      // También actualiza el estado local del admin
-      const toAdd = MOCK_PRODUCTS.map(p => ({
-        ...p, description:'', inOffer:false, offerPrice:null,
-        hasTon:false, tonValue:'', visible:true, lowStock:false,
-      }));
-      handleChange({ ...config, products: [...(config.products||[]), ...toAdd] });
       setImportDone(true);
       localStorage.setItem('urriola_import_done', '1');
-      setToast(`✅ ${count} productos subidos a Firebase`);
-      setTimeout(() => setToast(null), 3500);
+      showToast(`✅ ${MOCK_PRODUCTS.length} productos importados a Firebase`);
     } catch (err) {
       console.error(err);
-      setToast('❌ Error al importar. Revisá la consola.');
-      setTimeout(() => setToast(null), 3500);
+      showToast('❌ Error al importar. Revisá la consola.', 'error');
     } finally {
       setImporting(false);
     }
   };
 
-  // Importar CSV
   const handleCSVImport = async (e) => {
     const file = e.target.files[0]; if (!file) return;
     const text  = await file.text();
     const lines = text.trim().split('\n');
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-    const existingNames = new Set((config.products || []).map(p => p.name?.trim().toLowerCase()));
-    const newProds = [];
-    for (let i = 1; i < lines.length; i++) {
+    const headers = lines[0].split(',').map(h=>h.trim().toLowerCase());
+    const existingNames = new Set(products.map(p=>p.name?.trim().toLowerCase()));
+    let count = 0;
+    const { createProduct: cp } = await import('./firebase');
+    for (let i=1;i<lines.length;i++) {
       const vals = lines[i].split(',');
       const row  = {};
-      headers.forEach((h, idx) => { row[h] = vals[idx]?.trim() || ''; });
+      headers.forEach((h,idx) => { row[h] = vals[idx]?.trim()||''; });
       if (!row.name) continue;
-      // Saltar si ya existe con ese nombre
       if (existingNames.has(row.name.trim().toLowerCase())) continue;
-      newProds.push({
-        id: Date.now() + i,
-        brand:    row.brand    || '',
-        name:     row.name     || '',
-        price:    parseFloat(row.price) || 0,
-        category: row.category || 'facial',
-        image:    row.image    || '',
-        images:   row.image ? [row.image] : [],
-        stock:    row.stock !== 'false',
-        featured: row.featured === 'true',
-        inOffer:  false, offerPrice: null,
-        hasTon:   false, tonValue: '',
-        visible:  true,  lowStock: false,
-        description: '', rating: 4.5, reviews: 0,
-      });
+      try {
+        await cp({
+          brand:row.brand||'', name:row.name, price:parseFloat(row.price)||0,
+          category:row.category||'facial', image:row.image||'', images:row.image?[row.image]:[],
+          stock:row.stock!=='false', visible:true, inOffer:false, offerPrice:null,
+          hasTon:false, tonValue:'', lowStock:false, description:'', rating:4.5, reviews:0,
+        });
+        count++;
+      } catch(err) { console.error(err); }
     }
-    handleChange({ ...config, products: [...(config.products||[]), ...newProds] });
-    setToast(`✅ ${newProds.length} productos importados desde CSV`); setTimeout(() => setToast(null), 3000);
-    e.target.value = '';
+    showToast(`✅ ${count} productos importados desde CSV`);
+    e.target.value='';
   };
 
   const handleLogout = async () => {
@@ -868,28 +1042,27 @@ export default function Admin() {
   };
 
   return (
-    <div className="min-h-screen bg-[#faf8f5]" style={{ fontFamily: "'Jost', sans-serif" }}>
+    <div className="min-h-screen bg-[#faf8f5]" style={{ fontFamily:"'Jost',sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Jost:wght@300;400;500;600&display=swap');`}</style>
 
-      {/* Topbar */}
       <header className="sticky top-0 z-40 bg-white border-b border-[#e8ddd0] shadow-sm">
         <div className="max-w-5xl mx-auto px-4 md:px-8 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="text-xl tracking-widest font-light" style={{ fontFamily:"'Cormorant Garamond', serif" }}>U.RRIOLA</span>
+            <span className="text-xl tracking-widest font-light" style={{ fontFamily:"'Cormorant Garamond',serif" }}>U.RRIOLA</span>
             <span className="text-[9px] tracking-[0.3em] uppercase text-[#b8986a] bg-[#c9a96e]/10 px-2.5 py-1 rounded-full font-semibold">Admin</span>
           </div>
           <nav className="hidden md:flex gap-1">
-            {MAIN_TABS.map(t => { const I=t.icon; return (
-              <button key={t.id} onClick={() => setActiveTab(t.id)}
+            {MAIN_TABS.map(t=>{ const I=t.icon; return (
+              <button key={t.id} onClick={()=>setActiveTab(t.id)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium transition-all
-                  ${activeTab===t.id ? 'bg-[#4a3a31] text-white' : 'text-[#4a3a31] hover:bg-[#4a3a31]/8'}`}>
+                  ${activeTab===t.id?'bg-[#4a3a31] text-white':'text-[#4a3a31] hover:bg-[#4a3a31]/8'}`}>
                 <I size={13}/>{t.label}
               </button>
             );})}
           </nav>
           <div className="flex items-center gap-2">
             {dirty && <span className="hidden md:block text-[10px] text-amber-500 font-medium animate-pulse">● Sin guardar</span>}
-            <button onClick={() => setSettingsOpen(true)} title="Configuración avanzada"
+            <button onClick={()=>setSettingsOpen(true)} title="Configuración avanzada"
               className="p-2.5 rounded-full border border-[#e8ddd0] text-[#4a3a31] hover:border-[#c9a96e] hover:text-[#c9a96e] transition-colors">
               <Settings size={16}/>
             </button>
@@ -899,7 +1072,7 @@ export default function Admin() {
             </button>
             <button onClick={handleSave}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-all
-                ${dirty ? 'bg-[#4a3a31] text-white hover:bg-[#c9a96e] shadow-md' : 'bg-gray-100 text-gray-400 cursor-default'}`}>
+                ${dirty?'bg-[#4a3a31] text-white hover:bg-[#c9a96e] shadow-md':'bg-gray-100 text-gray-400 cursor-default'}`}>
               <Save size={13}/> Guardar
             </button>
             <button onClick={handleLogout} title="Cerrar sesión"
@@ -908,12 +1081,11 @@ export default function Admin() {
             </button>
           </div>
         </div>
-        {/* Nav móvil */}
         <div className="md:hidden flex border-t border-[#f0ebe4]">
-          {MAIN_TABS.map(t => { const I=t.icon; return (
-            <button key={t.id} onClick={() => setActiveTab(t.id)}
+          {MAIN_TABS.map(t=>{ const I=t.icon; return (
+            <button key={t.id} onClick={()=>setActiveTab(t.id)}
               className={`flex-1 flex flex-col items-center py-2.5 gap-1 text-[10px] font-medium transition-colors
-                ${activeTab===t.id ? 'text-[#4a3a31] border-t-2 border-[#4a3a31]' : 'text-gray-400'}`}>
+                ${activeTab===t.id?'text-[#4a3a31] border-t-2 border-[#4a3a31]':'text-gray-400'}`}>
               <I size={16}/>{t.label}
             </button>
           );})}
@@ -921,13 +1093,24 @@ export default function Admin() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 md:px-8 py-8">
-        {activeTab === 'dashboard'  && <Dashboard config={config} onNavigate={handleNavigate} onImportMock={handleImportMock} onCSVImport={handleCSVImport} importing={importing} importDone={importDone} />}
-        {activeTab === 'products'   && <ProductsSection config={config} onChange={handleChange} initialFilter={activeFilter}/>}
-        {activeTab === 'categories' && <CategoriesSection config={config} onChange={handleChange}/>}
+        {loadingProds && activeTab !== 'dashboard' ? (
+          <div className="flex items-center justify-center py-32">
+            <svg className="animate-spin w-7 h-7 text-[#c9a96e]" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+            </svg>
+          </div>
+        ) : (
+          <>
+            {activeTab==='dashboard'  && <Dashboard products={products} config={config} onNavigate={handleNavigate} onImportMock={handleImportMock} onCSVImport={handleCSVImport} importing={importing} importDone={importDone}/>}
+            {activeTab==='products'   && <ProductsSection products={products} setProducts={setProducts} onToast={showToast} initialFilter={activeFilter}/>}
+            {activeTab==='categories' && <CategoriesSection config={config} onChange={handleChange}/>}
+          </>
+        )}
       </main>
 
-      <SettingsDrawer isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} config={config} onChange={handleChange}/>
-      {toast && <Toast message={toast}/>}
+      <SettingsDrawer isOpen={settingsOpen} onClose={()=>setSettingsOpen(false)} config={config} onChange={handleChange}/>
+      {toast && <Toast message={toast.msg} type={toast.type}/>}
     </div>
   );
 }

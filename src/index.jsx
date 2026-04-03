@@ -36,7 +36,7 @@ function ReelCard({ reel }) {
       style={{ aspectRatio: '9/16' }} onClick={togglePlay}>
       <video ref={videoRef} src={reel.src} poster={reel.thumb}
         muted loop playsInline preload="none"
-        className="absolute inset-0 w-full h-full object-cover object-center" />
+        className="absolute inset-0 w-full h-full object-cover" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
       {!playing && (
         <div className="absolute inset-0 flex items-center justify-center">
@@ -107,13 +107,8 @@ export default function Index({ cartCount = 0, onOpenCart }) {
     v.setAttribute('webkit-playsinline', '');
     const tryPlay = () => v.play().catch(() => {});
     tryPlay();
-    // iOS necesita un gesto del usuario la primera vez
     document.addEventListener('touchstart', tryPlay, { once: true });
-    document.addEventListener('touchend',   tryPlay, { once: true });
-    return () => {
-      document.removeEventListener('touchstart', tryPlay);
-      document.removeEventListener('touchend',   tryPlay);
-    };
+    return () => document.removeEventListener('touchstart', tryPlay);
   }, [hero.type, hero.src]);
 
   // ── Autoplay editorial ─────────────────────────────────────────────────────
@@ -147,18 +142,39 @@ export default function Index({ cartCount = 0, onOpenCart }) {
   const renderHeroBg = () => {
     if (hero.type === 'video' && hero.src) {
       return (
+        /*
+         * iOS Safari requiere:
+         *  - muted como atributo HTML (no solo prop)
+         *  - playsinline en minúsculas como atributo HTML
+         *  - webkit-playsinline para Safari antiguo
+         *  - autoplay sin pausa
+         * Usamos ref callback para forzar el play inmediato.
+         */
         <video
-          ref={heroVideoRef}
+          ref={el => {
+            heroVideoRef.current = el;
+            if (el) {
+              el.muted = true;
+              el.defaultMuted = true;
+              el.setAttribute('muted', '');
+              el.setAttribute('playsinline', '');
+              el.setAttribute('webkit-playsinline', '');
+              el.play().catch(() => {
+                // Si falla (política de autoplay), intentar en primer touch
+                const retry = () => { el.play().catch(() => {}); document.removeEventListener('touchstart', retry); };
+                document.addEventListener('touchstart', retry, { once: true });
+              });
+            }
+          }}
+          src={hero.src}
           autoPlay
           muted
           loop
           playsInline
           preload="auto"
-          className="absolute inset-0 w-full h-full object-cover object-center"
-          style={{ WebkitPlaysinline: true }}
-        >
-          <source src={hero.src} type="video/mp4" />
-        </video>
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ objectFit: 'cover' }}
+        />
       );
     }
     return (
